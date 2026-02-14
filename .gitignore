@@ -9,6 +9,7 @@ yolo_dataset/
 *.pt
 
 # Results
+models/cnn/test_results/
 results/
 inference/
 inference00/
