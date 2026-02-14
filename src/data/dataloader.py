@@ -1,145 +1,195 @@
-# D:\Coding\SEM-8-NEW\OIL-SPILL\src\data\dataloader.py
+# /content/drive/MyDrive/OIL-SPILL-8/src/data/dataloader.py
 
 import os
-import numpy as np
 import tensorflow as tf
+import numpy as np
 
 # ---------------------------------------------------
-# ABSOLUTE PATH FOR PROCESSED DATASET (Google Drive)
+# PATHS
 # ---------------------------------------------------
-PROCESSED_DIR = r"D:\Coding\SEM-8-NEW\OIL-SPILL\src\data\processed"
+
+PROCESSED_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed"
 IMG_SIZE = (256, 256)
 
-# ---------------------------------------------------
-# Helper: load npy file
-# ---------------------------------------------------
-def load_npy(path):
-    return np.load(path)
+AUTOTUNE = tf.data.AUTOTUNE
 
 # ---------------------------------------------------
-# CNN Dataset (Classification)
+# COMMON IMAGE LOADER
 # ---------------------------------------------------
+
+def load_image(img_path):
+    img = tf.io.read_file(img_path)
+    img = tf.image.decode_image(img, channels=3, expand_animations=False)
+    img = tf.image.resize(img, IMG_SIZE)
+    img = tf.cast(img, tf.float32) / 255.0
+    return img
+
+# ---------------------------------------------------
+# LOAD CNN LABELS (labels.txt)
+# ---------------------------------------------------
+
+def load_cnn_labels(split):
+    label_file = os.path.join(PROCESSED_DIR, split, "labels.txt")
+    label_map = {}
+
+    with open(label_file, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 2:
+                continue
+
+            label = int(parts[-1])
+            fname = " ".join(parts[:-1])
+
+            label_map[fname] = label
+
+    return label_map
+
+
+# ---------------------------------------------------
+# CNN DATASET (IMAGE + LABEL ONLY)
+# ---------------------------------------------------
+
 def create_cnn_dataset(split, batch_size=16, augment=False):
     """
-    Returns tf.data.Dataset of (image, label)
+    Returns: tf.data.Dataset (image, label)
 
-    Label definition:
-    0 → Mostly water (normal marine scene)
-    1 → Significant non-water presence (ships / land / structures)
+    CNN sees:
+    - Image
+    - Image-level oil label
+
+    CNN ignores:
+    - Masks
     """
 
     img_dir = os.path.join(PROCESSED_DIR, split, "images")
-    mask_dir = os.path.join(PROCESSED_DIR, split, "masks")
+    label_map = load_cnn_labels(split)
 
-    img_files = sorted(os.listdir(img_dir))
+    image_paths = []
+    labels = []
 
-    image_paths = [os.path.join(img_dir, f) for f in img_files]
-    mask_paths = [os.path.join(mask_dir, f) for f in img_files]
+    for fname, label in label_map.items():
+        img_path = os.path.join(img_dir, fname)
+        if os.path.exists(img_path):
+            image_paths.append(img_path)
+            labels.append(label)
 
-    def load_item(img_path, mask_path):
-        img = load_npy(img_path.numpy().decode())
-        mask = load_npy(mask_path.numpy().decode())
+    image_paths = tf.constant(image_paths)
+    labels = tf.constant(labels, dtype=tf.int32)
 
-        # 🔑 IMPORTANT: WATER CLASS ID (verify once visually)
-        WATER_CLASS = 174   # change ONLY if your mask visualization proves otherwise
-
-        non_water_ratio = np.sum(mask != WATER_CLASS) / mask.size
-        label = 1 if non_water_ratio > 0.05 else 0
-
-        return img.astype("float32"), np.array(label, dtype="float32")
-
-    def tf_wrapper(img_path, mask_path):
-        img, label = tf.py_function(
-            load_item,
-            inp=[img_path, mask_path],
-            Tout=[tf.float32, tf.float32]
-        )
-        img.set_shape((*IMG_SIZE, 3))
-        label.set_shape(())
+    def load_item(img_path, label):
+        img = load_image(img_path)
         return img, label
 
-    dataset = tf.data.Dataset.from_tensor_slices((image_paths, mask_paths))
-    dataset = dataset.map(tf_wrapper, num_parallel_calls=tf.data.AUTOTUNE)
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths, labels))
+    dataset = dataset.map(load_item, num_parallel_calls=AUTOTUNE)
 
     if augment:
-        dataset = dataset.map(augment_cnn, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(augment_cnn, num_parallel_calls=AUTOTUNE)
 
-    dataset = dataset.shuffle(500).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.shuffle(500).batch(batch_size).prefetch(AUTOTUNE)
     return dataset
 
 # ---------------------------------------------------
-# CNN Augmentation
+# CNN AUGMENTATION
 # ---------------------------------------------------
+
 def augment_cnn(img, label):
     img = tf.image.random_flip_left_right(img)
     img = tf.image.random_flip_up_down(img)
-    img = tf.image.random_brightness(img, max_delta=0.2)
+    img = tf.image.random_brightness(img, 0.2)
     img = tf.image.random_contrast(img, 0.8, 1.2)
     return img, label
 
 # ---------------------------------------------------
-# U-Net Dataset (UNCHANGED — handled later)
+# U-NET DATASET (IMAGE + MASK)
 # ---------------------------------------------------
-def create_unet_dataset(split, batch_size=8, augment=False):
+
+def create_unet_dataset(split, batch_size=8, augment=False, min_oil_ratio=0.01):
     """
-    Returns tf.data.Dataset of (image, mask)
+    Returns: tf.data.Dataset (image, mask)
+
+    U-Net sees:
+    - Image
+    - Binary oil mask
+
+    Filters:
+    - Removes pure black / pure white masks
     """
+
     img_dir = os.path.join(PROCESSED_DIR, split, "images")
     mask_dir = os.path.join(PROCESSED_DIR, split, "masks")
 
     img_files = sorted(os.listdir(img_dir))
 
-    image_paths = [os.path.join(img_dir, f) for f in img_files]
-    mask_paths = [os.path.join(mask_dir, f) for f in img_files]
+    image_paths = []
+    mask_paths = []
+
+    for fname in img_files:
+        img_path = os.path.join(img_dir, fname)
+        mask_path = os.path.join(mask_dir, os.path.splitext(fname)[0] + ".png")
+
+        if not os.path.exists(mask_path):
+            continue
+
+        # quick oil-pixel filter (numpy, once)
+        mask = tf.io.read_file(mask_path)
+        mask = tf.image.decode_image(mask, channels=1, expand_animations=False)
+        mask = tf.cast(mask, tf.float32) / 255.0
+        oil_ratio = tf.reduce_mean(mask)
+
+        if oil_ratio > min_oil_ratio and oil_ratio < 0.95:
+            image_paths.append(img_path)
+            mask_paths.append(mask_path)
+
+    image_paths = tf.constant(image_paths)
+    mask_paths = tf.constant(mask_paths)
 
     def load_item(img_path, mask_path):
-        img = load_npy(img_path.numpy().decode())
-        mask = load_npy(mask_path.numpy().decode())
+        img = load_image(img_path)
 
-        mask = np.expand_dims(mask, axis=-1)  # (256,256,1)
-        return img.astype("float32"), mask.astype("float32")
+        mask = tf.io.read_file(mask_path)
+        mask = tf.image.decode_image(mask, channels=1, expand_animations=False)
+        mask = tf.image.resize(mask, IMG_SIZE, method="nearest")
+        mask = tf.cast(mask, tf.float32) / 255.0
 
-    def tf_wrapper(img_path, mask_path):
-        img, mask = tf.py_function(
-            load_item,
-            inp=[img_path, mask_path],
-            Tout=[tf.float32, tf.float32]
-        )
-        img.set_shape((*IMG_SIZE, 3))
-        mask.set_shape((*IMG_SIZE, 1))
         return img, mask
 
     dataset = tf.data.Dataset.from_tensor_slices((image_paths, mask_paths))
-    dataset = dataset.map(tf_wrapper, num_parallel_calls=tf.data.AUTOTUNE)
+    dataset = dataset.map(load_item, num_parallel_calls=AUTOTUNE)
 
     if augment:
-        dataset = dataset.map(augment_unet, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(augment_unet, num_parallel_calls=AUTOTUNE)
 
-    dataset = dataset.shuffle(500).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset = dataset.shuffle(200).batch(batch_size).prefetch(AUTOTUNE)
     return dataset
 
 # ---------------------------------------------------
-# U-Net Augmentation
+# U-NET AUGMENTATION
 # ---------------------------------------------------
-def augment_unet(img, mask):
-    img = tf.image.random_flip_left_right(img)
-    mask = tf.image.random_flip_left_right(mask)
 
-    img = tf.image.random_flip_up_down(img)
-    mask = tf.image.random_flip_up_down(mask)
+def augment_unet(img, mask):
+    if tf.random.uniform(()) > 0.5:
+        img = tf.image.flip_left_right(img)
+        mask = tf.image.flip_left_right(mask)
+
+    if tf.random.uniform(()) > 0.5:
+        img = tf.image.flip_up_down(img)
+        mask = tf.image.flip_up_down(mask)
 
     return img, mask
 
 # ---------------------------------------------------
-# Debug Test
+# DEBUG TEST
 # ---------------------------------------------------
+
 if __name__ == "__main__":
-    print("Testing CNN dataloader...")
-    train_cnn = create_cnn_dataset("train", augment=True)
-    for img, label in train_cnn.take(1):
+    print("🔹 Testing CNN dataloader...")
+    cnn_ds = create_cnn_dataset("train", augment=True)
+    for img, label in cnn_ds.take(1):
         print("CNN batch:", img.shape, label.numpy())
 
-    print("\nTesting UNET dataloader...")
-    train_unet = create_unet_dataset("train", augment=True)
-    for img, mask in train_unet.take(1):
-        print("UNET batch:", img.shape, mask.shape)
+    print("\n🔹 Testing U-Net dataloader...")
+    unet_ds = create_unet_dataset("train", augment=True)
+    for img, mask in unet_ds.take(1):
+        print("U-Net batch:", img.shape, mask.shape)
