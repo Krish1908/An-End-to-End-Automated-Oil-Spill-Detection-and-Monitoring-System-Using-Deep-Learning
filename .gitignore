@@ -1,0 +1,25 @@
+# Dataset
+dataset_1/
+src/data/processed/
+yolo_dataset/
+
+# Model weights
+*.keras
+*.h5
+*.pt
+
+# Results
+results/
+inference/
+inference00/
+unet_predictions/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS
+.DS_Store
+Thumbs.db
