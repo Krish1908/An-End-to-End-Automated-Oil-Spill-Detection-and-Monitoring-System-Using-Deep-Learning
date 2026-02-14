@@ -29,3 +29,7 @@ Thumbs.db
 *.png
 *.xlsx
 yolov5/
+
+*.md
+
+*.pdf
