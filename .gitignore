@@ -33,3 +33,7 @@ yolov5/
 *.md
 
 *.pdf
+
+*.tex
+
+papers/
