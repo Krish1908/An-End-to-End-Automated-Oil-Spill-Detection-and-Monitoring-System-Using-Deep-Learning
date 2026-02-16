@@ -37,3 +37,7 @@ yolov5/
 *.tex
 
 papers/
+
+kaggle_fine_tuning_notebook.py
+src/training/fine_tune_unet_kaggle.py
+src/training/kaggle_notebook_fine_tune.py
