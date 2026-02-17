@@ -37,3 +37,6 @@ yolov5/
 *.tex
 
 papers/
+
+
+app-old.py
