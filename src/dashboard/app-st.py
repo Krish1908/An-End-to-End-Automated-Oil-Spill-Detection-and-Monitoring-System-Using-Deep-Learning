@@ -1,47 +1,24 @@
 #!/usr/bin/env python3
 """
-Enhanced Oil Spill Detection Web Application - Streamlit Version
-Integrates all 3 ML models: CNN (Classification), U-Net (Segmentation), YOLO (Detection)
-Features: Timestamps, Legend Overlays, Comprehensive Results, Multi-Model Analysis
-
-FIXES APPLIED (v2):
-  1. land_water_mask() — was the primary culprit. The old fixed-threshold approach
-     classified dock/sand/ship pixels as "water", producing a chaotic mask that
-     AND-ed away the real oil region. Fixed with:
-       • SAR/satellite-aware heuristic: use the U-Net probability map directly to
-         derive a "permissive" water zone (skip the land mask entirely when image is
-         a visible-spectrum satellite image with mixed terrain).
-       • New option: SKIP_WATER_MASK (default True) — just use the morphology-cleaned
-         mask without the AND step, which is the correct behaviour for RGB satellite
-         imagery that already has diverse textures.
-       • When the water mask IS used, switch to Otsu on the full image rather than
-         a hardcoded luminance threshold.
-  2. postprocess_mask() — the water-mask AND was silently deleting valid oil pixels.
-     Now the AND step is guarded by SKIP_WATER_MASK.
-  3. Auto-polarity detection — border_ratio heuristic was unreliable. Replaced with
-     a simpler check: if mean(pred_prob) > 0.5 the model is outputting "high = background",
-     so invert. This matches the U-Net output convention reliably.
-  4. use_column_width deprecation warnings — replaced with use_container_width=True.
-  5. Thresholds now properly updated to globals before calling postprocess_mask.
+AI-Driven Oil Spill Detection  —  Final Production Version
+Models : CNN (binary classification) · U-Net (segmentation) · YOLO (localisation)
+Author : (your name)
 """
 
-import streamlit as st
-import numpy as np
-import cv2
-import tensorflow as tf
-from datetime import datetime
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from PIL import Image
+# =================================================
+# IMPORTS
+# =================================================
 import io
 import os
+from datetime import datetime
 from pathlib import Path
 
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import streamlit as st
+import tensorflow as tf
+from PIL import Image
 
 try:
     from ultralytics import YOLO
@@ -50,366 +27,328 @@ except ImportError:
     ULTRALYTICS_AVAILABLE = False
 
 # =================================================
-# PAGE CONFIGURATION
+# CONSTANTS
+# =================================================
+IMG_SIZE       = 256
+CNN_THRESHOLD  = 0.5
+UNET_THRESHOLD = 0.4
+MIN_AREA       = 600
+YOLO_CONF      = 0.5
+OPEN_KERNEL    = 5          # morphological opening  (noise removal)
+CLOSE_KERNEL   = 5          # morphological closing  (gap filling)
+
+CNN_PATH        = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\cnn\cnn_classifier.keras")
+UNET_PATH       = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\unet\unet_segmentation.keras")
+YOLO_PATH       = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\yolo\best.pt")
+
+# =================================================
+# PAGE CONFIG
 # =================================================
 st.set_page_config(
-    page_title="AI-Driven Oil Spill Detection",
+    page_title="AI Oil Spill Detection",
     page_icon="🛢️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # =================================================
-# CONFIGURATION & MODEL PATHS
-# =================================================
-IMG_SIZE = 256
-CNN_THRESHOLD = 0.5
-UNET_THRESHOLD = 0.4
-MIN_AREA = 600
-YOLO_CONFIDENCE = 0.5
-
-WORKSPACE_ROOT = Path(__file__).parent
-CNN_MODEL_PATH  = WORKSPACE_ROOT / "models" / "cnn"  / "cnn_classifier.keras"
-UNET_MODEL_PATH = WORKSPACE_ROOT / "models" / "unet" / "unet_segmentation.keras"
-YOLO_MODEL_PATH = WORKSPACE_ROOT / "models" / "yolo" / "best.pt"
-
-# =================================================
-# HELPER FUNCTIONS
-# =================================================
-
-def preprocess_image(img):
-    img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-    img = img / 255.0
-    return img.astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# FIX 1 — land_water_mask
-# ---------------------------------------------------------------------------
-def land_water_mask(image_rgb, skip=False):
-    """
-    Return a binary water mask (1 = water / oil-possible region).
-
-    Parameters
-    ----------
-    image_rgb : np.ndarray, shape (H, W, 3), uint8
-    skip      : bool
-        When True, the function returns an all-ones mask so that the water-mask
-        AND step in postprocess_mask becomes a no-op.  This is the correct
-        default for visible-spectrum satellite imagery with mixed terrain
-        (ships, docks, sand) where simple luminance thresholding is unreliable.
-
-    Method choices (controlled via sidebar):
-      'skip'  — all ones (recommended for RGB satellite / mixed terrain)
-      'otsu'  — Otsu's adaptive thresholding on grayscale
-      'fixed' — fixed luminance threshold (legacy; only reliable for dark-water SAR)
-    """
-    if skip:
-        return np.ones((image_rgb.shape[0], image_rgb.shape[1]), dtype=np.uint8)
-
-    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-    method = globals().get('WATER_METHOD', 'otsu')
-    fixed_thresh = globals().get('WATER_FIXED_THRESHOLD', 130)
-
-    if method == 'otsu':
-        _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        water = th
-    else:  # fixed
-        _, water = cv2.threshold(gray, fixed_thresh, 255, cv2.THRESH_BINARY_INV)
-
-    kernel = np.ones((7, 7), np.uint8)
-    water = cv2.morphologyEx(water, cv2.MORPH_OPEN, kernel)
-    water = cv2.morphologyEx(water, cv2.MORPH_CLOSE, kernel)
-    return (water > 0).astype(np.uint8)
-
-
-# ---------------------------------------------------------------------------
-# FIX 2 — postprocess_mask  (water-mask AND now guarded by SKIP_WATER_MASK)
-# ---------------------------------------------------------------------------
-def postprocess_mask(pred_prob, image_rgb,
-                     threshold=None,
-                     open_kernel=5, close_kernel=5,
-                     min_area=None):
-    """
-    Post-process U-Net prediction mask.
-
-    Key fix: the water-mask AND step is now conditional on SKIP_WATER_MASK.
-    For RGB satellite imagery, set SKIP_WATER_MASK = True (sidebar default)
-    to prevent the broken luminance mask from erasing valid oil regions.
-    """
-    if threshold is None:
-        threshold = globals().get('UNET_THRESHOLD', 0.4)
-    if min_area is None:
-        min_area = globals().get('MIN_AREA', 600)
-
-    raw_mask = (pred_prob > float(threshold)).astype(np.uint8)
-
-    k_open  = np.ones((max(1, int(open_kernel)),  max(1, int(open_kernel))),  np.uint8)
-    k_close = np.ones((max(1, int(close_kernel)), max(1, int(close_kernel))), np.uint8)
-    oil_mask = cv2.morphologyEx(raw_mask, cv2.MORPH_OPEN,  k_open)
-    oil_mask = cv2.morphologyEx(oil_mask, cv2.MORPH_CLOSE, k_close)
-
-    # Remove small connected components
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(oil_mask)
-    clean_mask = np.zeros_like(oil_mask)
-    for i in range(1, num_labels):
-        if int(stats[i, cv2.CC_STAT_AREA]) > int(min_area):
-            clean_mask[labels == i] = 1
-
-    # --- Water mask gate ---
-    skip_water = globals().get('SKIP_WATER_MASK', True)
-    img_resized = cv2.resize(image_rgb, (IMG_SIZE, IMG_SIZE))
-    water_mask  = land_water_mask(img_resized, skip=skip_water)
-
-    return (clean_mask & water_mask).astype(np.uint8)
-
-
-def pick_auto_threshold(pred_prob, image_rgb,
-                        open_kernel=5, close_kernel=5,
-                        min_area=None):
-    """Sweep thresholds and return the one that yields the most stable mask."""
-    if min_area is None:
-        min_area = globals().get('MIN_AREA', 600)
-
-    best       = None
-    best_score = (999, 0)
-
-    for t in np.linspace(0.01, 0.95, 95):
-        mask_t = postprocess_mask(pred_prob, image_rgb,
-                                  threshold=t,
-                                  open_kernel=open_kernel,
-                                  close_kernel=close_kernel,
-                                  min_area=min_area)
-        num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask_t)
-        n   = int(num_labels - 1)
-        lrg = 0 if n == 0 else int(stats[1:, cv2.CC_STAT_AREA].max())
-
-        if n <= 2 and lrg > min_area:
-            return float(t)
-
-        score = (n, -lrg)
-        if score < best_score:
-            best_score = score
-            best = float(t)
-
-    return best if best is not None else float(globals().get('UNET_THRESHOLD', 0.4))
-
-
-def create_overlay(image_rgb, mask, alpha=0.4,
-                   draw_outline=True, outline_color=(0, 0, 0)):
-    """Blend a red fill over oil regions with optional boundary outline."""
-    image   = cv2.resize(image_rgb, (IMG_SIZE, IMG_SIZE))
-    blended = image.copy().astype(np.float32)
-
-    mask_indices = mask == 1
-    blended[mask_indices] = (
-        blended[mask_indices] * (1 - alpha) + np.array([255, 0, 0]) * alpha
-    )
-    blended = np.clip(blended, 0, 255).astype(np.uint8)
-
-    if draw_outline:
-        mask_uint8  = (mask * 255).astype(np.uint8)
-        kernel      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        mask_smooth = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel, iterations=1)
-        contours, _ = cv2.findContours(mask_smooth, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in contours:
-            epsilon = 0.02 * cv2.arcLength(contour, True)
-            approx  = cv2.approxPolyDP(contour, epsilon, True)
-            cv2.drawContours(blended, [approx], 0, outline_color, thickness=2)
-
-    return blended.astype(np.uint8)
-
-
-def create_legend_overlay(image_rgb, mask, yolo_results=None, timestamp=""):
-    """Full overlay with red fill, boundary, YOLO boxes, and text legend."""
-    image   = cv2.resize(image_rgb, (IMG_SIZE, IMG_SIZE))
-    blended = image.copy().astype(np.float32)
-
-    alpha = 0.4
-    mask_indices = mask == 1
-    blended[mask_indices] = (
-        blended[mask_indices] * (1 - alpha) + np.array([255, 0, 0]) * alpha
-    )
-    blended = np.clip(blended, 0, 255).astype(np.uint8)
-
-    mask_uint8  = (mask * 255).astype(np.uint8)
-    kernel      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask_smooth = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel, iterations=1)
-    contours, _ = cv2.findContours(mask_smooth, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for contour in contours:
-        epsilon = 0.02 * cv2.arcLength(contour, True)
-        approx  = cv2.approxPolyDP(contour, epsilon, True)
-        cv2.drawContours(blended, [approx], 0, (0, 0, 0), 2)
-
-    if yolo_results is not None:
-        try:
-            if ULTRALYTICS_AVAILABLE:
-                for result in yolo_results:
-                    for box in result.boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                        cv2.rectangle(blended, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                        cv2.putText(blended, f'YOLO: {conf:.2f}',
-                                    (x1, max(y1-10, 10)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-            else:
-                if hasattr(yolo_results, 'xyxy'):
-                    for det in yolo_results.xyxy[0]:
-                        x1, y1, x2, y2, conf, _ = det.cpu().numpy()
-                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                        cv2.rectangle(blended, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                        cv2.putText(blended, f'YOLO: {conf:.2f}',
-                                    (x1, max(y1-10, 10)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-        except Exception as e:
-            print(f"Error drawing YOLO boxes: {e}")
-
-    font     = cv2.FONT_HERSHEY_SIMPLEX
-    legend_y = 20
-    texts = [
-        f"Timestamp: {timestamp}",
-        "Red Fill: U-Net Oil Spill",
-        "Black Outline: U-Net Boundary",
-        "Yellow Box: YOLO Detection",
-    ]
-    for text in texts:
-        text_size = cv2.getTextSize(text, font, 0.4, 1)[0]
-        cv2.rectangle(blended, (8, legend_y - 10), (15 + text_size[0], legend_y + 10), (0, 0, 0), -1)
-        cv2.putText(blended, text, (10, legend_y), font, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-        legend_y += 20
-
-    return blended.astype(np.uint8)
-
-
-def calculate_metrics(mask):
-    total_pixels = int(mask.size)
-    oil_pixels   = int(mask.sum())
-    oil_percentage = float((oil_pixels / total_pixels) * 100) if total_pixels > 0 else 0.0
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask)
-    largest = 0 if num_labels == 1 else int(stats[1:, cv2.CC_STAT_AREA].max())
-    return {
-        'oil_percentage':         oil_percentage,
-        'total_components':       int(num_labels - 1),
-        'largest_component_area': largest,
-        'total_oil_pixels':       oil_pixels,
-    }
-
-
-def create_results_chart(metrics, cnn_prob, yolo_count):
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 9))
-    fig.suptitle("Multi-Model Oil Spill Detection Results", fontsize=14, fontweight='bold')
-
-    oil_percent   = metrics['oil_percentage']
-    water_percent = 100 - oil_percent
-
-    ax1.pie([oil_percent, water_percent],
-            labels=['Oil Spill', 'Clean Water'],
-            autopct='%1.1f%%',
-            colors=['#ff4d4d', '#4CAF50'],
-            explode=(0.08, 0), startangle=90,
-            textprops={"fontsize": 9})
-    ax1.set_title('U-Net: Oil Spill Area Distribution', fontsize=10, fontweight='bold')
-
-    ax2.bar(['Oil Detection'], [cnn_prob * 100], color='#2196F3', alpha=0.7)
-    ax2.set_ylim(0, 100)
-    ax2.set_ylabel('Confidence (%)', fontsize=9)
-    ax2.set_title(f'CNN Detection Confidence: {cnn_prob:.3f}', fontsize=10, fontweight='bold')
-    ax2.axhline(y=CNN_THRESHOLD * 100, color='red', linestyle='--', linewidth=2,
-                label=f'Threshold: {CNN_THRESHOLD}')
-    ax2.legend(fontsize=8)
-    ax2.grid(axis='y', alpha=0.3)
-
-    ax3.bar(['Total\nComponents', 'Largest\nComponent Area'],
-            [metrics['total_components'], metrics['largest_component_area']],
-            color=['#9C27B0', '#FF9800'], alpha=0.7)
-    ax3.set_ylabel('Pixels', fontsize=9)
-    ax3.set_title('U-Net: Component Analysis', fontsize=10, fontweight='bold')
-    ax3.grid(axis='y', alpha=0.3)
-
-    model_names     = ['CNN\nConfidence', 'U-Net\nSpill %', f'YOLO\nBoxes\n({yolo_count})']
-    detection_scores= [min(cnn_prob * 100, 100), oil_percent, min(yolo_count * 20, 100)]
-    ax4.bar(model_names, detection_scores, color=['#2196F3', '#4CAF50', '#FF9800'], alpha=0.7)
-    ax4.set_ylabel('Score', fontsize=9)
-    ax4.set_title('Multi-Model Detection Summary', fontsize=10, fontweight='bold')
-    ax4.set_ylim(0, 100)
-    ax4.grid(axis='y', alpha=0.3)
-
-    plt.tight_layout()
-    return fig
-
-
-# =================================================
-# LOAD MODELS (CACHED)
-# =================================================
-
-@st.cache_resource
-def load_cnn_model():
-    try:
-        model = tf.keras.models.load_model(str(CNN_MODEL_PATH))
-        st.sidebar.success("✅ CNN Model Loaded")
-        return model
-    except Exception as e:
-        st.sidebar.error(f"❌ CNN Error: {e}")
-        return None
-
-@st.cache_resource
-def load_unet_model():
-    try:
-        model = tf.keras.models.load_model(str(UNET_MODEL_PATH), compile=False)
-        st.sidebar.success("✅ U-Net Model Loaded")
-        return model
-    except Exception as e:
-        st.sidebar.error(f"❌ U-Net Error: {e}")
-        return None
-
-@st.cache_resource
-def load_yolo_model():
-    try:
-        yolo_abs = os.path.abspath(YOLO_MODEL_PATH)
-        if not os.path.exists(yolo_abs):
-            st.sidebar.info("ℹ️ YOLO: Model file not found")
-            return None
-        if ULTRALYTICS_AVAILABLE:
-            model = YOLO(yolo_abs)
-            model.conf = YOLO_CONFIDENCE
-            st.sidebar.success("✅ YOLO Loaded")
-            return model
-        st.sidebar.info("ℹ️ YOLO: ultralytics not installed")
-        return None
-    except Exception:
-        st.sidebar.info("ℹ️ YOLO: Disabled")
-        return None
-
-
-cnn_model  = load_cnn_model()
-unet_model = load_unet_model()
-yolo_model = load_yolo_model()
-
-# =================================================
-# STYLES
+# CSS
 # =================================================
 st.markdown("""
 <style>
-.main-header {
+.hero {
     text-align: center;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 2rem; border-radius: 10px; color: white; margin-bottom: 1rem;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    padding: 2.2rem 1rem;
+    border-radius: 12px;
+    color: white;
+    margin-bottom: 1.2rem;
 }
-.main-header h1 { margin: 0; font-size: 2.5rem; }
-.main-header p  { margin: 0.5rem 0 0; font-size: 1rem; opacity: 0.9; }
+.hero h1  { margin: 0; font-size: 2.4rem; letter-spacing: -0.5px; }
+.hero p   { margin: 0.4rem 0 0; font-size: 1rem; opacity: 0.75; }
+.section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 0.3rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
+# =================================================
+# MODEL LOADING  (cached — runs once per session)
+# =================================================
+@st.cache_resource
+def load_cnn():
+    try:
+        m = tf.keras.models.load_model(str(CNN_PATH))
+        return m, True
+    except Exception as e:
+        return None, str(e)
+
+@st.cache_resource
+def load_unet():
+    try:
+        m = tf.keras.models.load_model(str(UNET_PATH), compile=False)
+        return m, True
+    except Exception as e:
+        return None, str(e)
+
+@st.cache_resource
+def load_yolo():
+    if not ULTRALYTICS_AVAILABLE:
+        return None, "ultralytics not installed"
+    yolo_abs = os.path.abspath(YOLO_PATH)
+    if not os.path.exists(yolo_abs):
+        return None, "model file not found"
+    try:
+        m = YOLO(yolo_abs)
+        m.conf = YOLO_CONF
+        return m, True
+    except Exception as e:
+        return None, str(e)
+
+cnn_model,  cnn_ok   = load_cnn()
+unet_model, unet_ok  = load_unet()
+yolo_model, yolo_ok  = load_yolo()
+
+# =================================================
+# CORE PROCESSING FUNCTIONS
+# =================================================
+def preprocess(img_rgb: np.ndarray) -> np.ndarray:
+    """Resize + normalise to [0,1] float32, return (1, H, W, 3) batch."""
+    img = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE)) / 255.0
+    return np.expand_dims(img.astype(np.float32), axis=0)
+
+
+def postprocess_mask(pred_prob: np.ndarray,
+                     threshold: float,
+                     min_area: int) -> np.ndarray:
+    """
+    Binarise U-Net output → morphological clean-up → remove small blobs.
+    Water-mask AND step is intentionally skipped (set to all-ones) because
+    luminance thresholding is unreliable on RGB satellite imagery with mixed
+    terrain (ships, docks, sand).  This was the root cause of the broken
+    outputs in earlier versions.
+    """
+    raw = (pred_prob > threshold).astype(np.uint8)
+
+    k_o = np.ones((OPEN_KERNEL,  OPEN_KERNEL),  np.uint8)
+    k_c = np.ones((CLOSE_KERNEL, CLOSE_KERNEL), np.uint8)
+    cleaned = cv2.morphologyEx(raw,     cv2.MORPH_OPEN,  k_o)
+    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, k_c)
+
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned)
+    final = np.zeros_like(cleaned)
+    for i in range(1, n_labels):
+        if stats[i, cv2.CC_STAT_AREA] > min_area:
+            final[labels == i] = 1
+
+    return final.astype(np.uint8)
+
+
+def auto_invert(pred_prob: np.ndarray) -> tuple[np.ndarray, bool]:
+    """
+    If the model outputs high probabilities for the background (mean > 0.5),
+    invert so that oil = high.  Returns (corrected_prob, was_inverted).
+    """
+    if pred_prob.mean() > 0.5:
+        return 1.0 - pred_prob, True
+    return pred_prob, False
+
+
+def build_overlay(img_rgb: np.ndarray,
+                  mask: np.ndarray,
+                  alpha: float = 0.4,
+                  outline: bool = True) -> np.ndarray:
+    """Red semi-transparent fill + optional black boundary contour."""
+    img     = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE))
+    blended = img.copy().astype(np.float32)
+
+    blended[mask == 1] = blended[mask == 1] * (1 - alpha) + np.array([255, 0, 0]) * alpha
+    blended = np.clip(blended, 0, 255).astype(np.uint8)
+
+    if outline and mask.any():
+        m8  = (mask * 255).astype(np.uint8)
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        m8  = cv2.morphologyEx(m8, cv2.MORPH_CLOSE, ker)
+        contours, _ = cv2.findContours(m8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours:
+            eps   = 0.02 * cv2.arcLength(c, True)
+            approx = cv2.approxPolyDP(c, eps, True)
+            cv2.drawContours(blended, [approx], 0, (0, 0, 0), 2)
+
+    return blended
+
+
+def draw_yolo_boxes(base_img: np.ndarray, results) -> np.ndarray:
+    """Draw YOLO bounding boxes (cyan) onto a copy of base_img."""
+    out = base_img.copy()
+    if results is None:
+        return out
+    try:
+        for result in results:
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                conf = float(box.conf[0])
+                cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                cv2.putText(out, f"{conf:.2f}", (x1, max(y1 - 6, 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    except Exception:
+        pass
+    return out
+
+
+def compute_metrics(mask: np.ndarray) -> dict:
+    oil_px  = int(mask.sum())
+    total   = int(mask.size)
+    oil_pct = (oil_px / total * 100) if total else 0.0
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    largest = 0 if n == 1 else int(stats[1:, cv2.CC_STAT_AREA].max())
+    return {
+        "oil_pct":    oil_pct,
+        "n_comps":    n - 1,
+        "largest_px": largest,
+        "oil_px":     oil_px,
+        "total_px":   total,
+    }
+
+# =================================================
+# CHART HELPERS
+# =================================================
+PIE_COLORS = ["#e63946", "#4CAF50"]
+
+def pie_chart(oil_pct: float, title: str, figsize=(5, 4)):
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.pie(
+        [oil_pct, 100 - oil_pct],
+        labels=["Oil Spill", "Clean Water"],
+        autopct="%1.1f%%",
+        colors=PIE_COLORS,
+        explode=(0.07, 0),
+        startangle=90,
+        textprops={"fontsize": 9},
+    )
+    ax.set_title(title, fontsize=10, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
+def summary_chart(metrics: dict, cnn_prob: float, yolo_count: int):
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    fig.suptitle("Multi-Model Detection Summary", fontsize=13, fontweight="bold")
+
+    # CNN confidence bar
+    axes[0].bar(["CNN"], [cnn_prob * 100], color="#2196F3", alpha=0.8, width=0.4)
+    axes[0].axhline(CNN_THRESHOLD * 100, color="red", ls="--", lw=1.5, label=f"Threshold {CNN_THRESHOLD}")
+    axes[0].set_ylim(0, 100); axes[0].set_ylabel("Confidence (%)"); axes[0].legend(fontsize=8)
+    axes[0].set_title("CNN Classification", fontweight="bold")
+    axes[0].grid(axis="y", alpha=0.3)
+
+    # U-Net component breakdown
+    axes[1].bar(["Components", "Largest (px/10)"],
+                [metrics["n_comps"], metrics["largest_px"] / 10],
+                color=["#9C27B0", "#FF9800"], alpha=0.8)
+    axes[1].set_title("U-Net Components", fontweight="bold")
+    axes[1].grid(axis="y", alpha=0.3)
+
+    # Model comparison
+    scores = [
+        min(cnn_prob * 100, 100),
+        metrics["oil_pct"],
+        min(yolo_count * 20, 100),
+    ]
+    axes[2].bar(["CNN\nConf %", "U-Net\nSpill %", f"YOLO\n({yolo_count} det)"],
+                scores, color=["#2196F3", "#e63946", "#FF9800"], alpha=0.8)
+    axes[2].set_ylim(0, 100); axes[2].set_title("All Models", fontweight="bold")
+    axes[2].grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def report_figure(img_rgb, mask, overlay, metrics, cnn_prob, yolo_count, timestamp):
+    """6-panel downloadable report figure."""
+    oil_pct = metrics["oil_pct"]
+
+    fig = plt.figure(figsize=(15, 8))
+    gs  = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.3)
+
+    ax_o = fig.add_subplot(gs[0, 0]); ax_o.imshow(img_rgb)
+    ax_o.set_title("Original Image", fontweight="bold"); ax_o.axis("off")
+
+    ax_m = fig.add_subplot(gs[0, 1]); ax_m.imshow(mask * 255, cmap="gray")
+    ax_m.set_title("U-Net Segmentation Mask", fontweight="bold"); ax_m.axis("off")
+
+    ax_v = fig.add_subplot(gs[0, 2]); ax_v.imshow(overlay)
+    ax_v.set_title("Oil Spill Overlay", fontweight="bold"); ax_v.axis("off")
+
+    ax_p = fig.add_subplot(gs[1, 0])
+    ax_p.pie([oil_pct, 100 - oil_pct], labels=["Oil", "Water"],
+             autopct="%1.0f%%", colors=PIE_COLORS,
+             explode=(0.05, 0), startangle=90, textprops={"fontsize": 8})
+    ax_p.set_title("Area Distribution", fontweight="bold", fontsize=9)
+
+    ax_t = fig.add_subplot(gs[1, 1]); ax_t.axis("off")
+    ax_t.text(0.08, 0.5, (
+        f"DETECTION RESULTS\n\n"
+        f"Timestamp : {timestamp}\n\n"
+        f"CNN Confidence  : {cnn_prob:.3f}\n"
+        f"U-Net Oil Cover : {oil_pct:.2f}%\n"
+        f"YOLO Detections : {yolo_count}\n\n"
+        f"Components      : {metrics['n_comps']}\n"
+        f"Largest Region  : {metrics['largest_px']} px\n"
+        f"Total Oil Pixels: {metrics['oil_px']}"
+    ), fontfamily="monospace", fontsize=8.5, va="center",
+       bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.6))
+
+    ax_l = fig.add_subplot(gs[1, 2]); ax_l.axis("off")
+    ax_l.text(0.08, 0.5, (
+        "LEGEND\n\n"
+        "🔴  Red fill     → Oil region\n"
+        "⚪  White mask  → Segmentation\n"
+        "⬛  Black line   → Oil boundary\n"
+        "🟨  Cyan box    → YOLO detection\n\n"
+        "MODELS\n"
+        "• CNN  — binary classifier\n"
+        "• U-Net — pixel segmentation\n"
+        "• YOLO  — bounding-box detect"
+    ), fontfamily="monospace", fontsize=8.5, va="center",
+       bbox=dict(boxstyle="round", facecolor="lightcyan", alpha=0.6))
+
+    fig.suptitle("Oil Spill Detection — Comprehensive Analysis Report",
+                 fontsize=14, fontweight="bold", y=0.99)
+    return fig
+
+
+def fig_to_bytes(fig) -> bytes:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def img_to_bytes(arr: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+# =================================================
+# HEADER
+# =================================================
 st.markdown("""
-<div class="main-header">
+<div class="hero">
     <h1>🛢️ AI-Driven Oil Spill Detection</h1>
-    <p>CNN → Detection | U-Net → Segmentation | YOLO → Localization</p>
+    <p>CNN · U-Net · YOLO — multi-model satellite image analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
 timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S IST")
-st.caption(f"⏰ Analysis Timestamp: {timestamp}")
+st.caption(f"⏰ Session timestamp: {timestamp}")
 st.divider()
 
 # =================================================
@@ -417,424 +356,241 @@ st.divider()
 # =================================================
 with st.sidebar:
     st.header("⚙️ Settings")
-    st.subheader("📊 Detection Sensitivity")
-    st.caption("Adjust how confidently the models must be before flagging oil.")
 
-    cnn_threshold  = st.slider("CNN Detection Threshold",       0.0, 1.0, value=float(CNN_THRESHOLD),  step=0.01,
-                                help="Minimum CNN confidence to trigger segmentation (default: 0.5)")
-    unet_threshold = st.slider("Segmentation Sensitivity",      0.0, 1.0, value=float(UNET_THRESHOLD), step=0.01,
-                                help="Lower = more oil detected, Higher = stricter (default: 0.4)")
-    min_area       = st.number_input("Minimum Spill Size (pixels)", min_value=0, value=int(MIN_AREA), step=50,
-                                      help="Ignore detected patches smaller than this (default: 600)")
-    yolo_conf      = st.slider("YOLO Detection Confidence",     0.0, 1.0, value=float(YOLO_CONFIDENCE), step=0.01,
-                                help="Minimum confidence for YOLO bounding boxes (default: 0.5)")
-
-    # Fixed internals — not exposed to public users
-    show_unet_raw        = False
-    auto_detect_polarity = True
-    manual_invert        = False
-    use_auto_threshold   = False
-    open_kernel_size     = 5
-    close_kernel_size    = 5
-
-    # ---------------------------------------------------------------------------
-    # Water mask — hardcoded skip for RGB satellite (right default for this app)
-    # ---------------------------------------------------------------------------
-    SKIP_WATER_MASK       = True
-    WATER_METHOD          = "otsu"
-    WATER_FIXED_THRESHOLD = 130
-
-    # Push to globals so helper functions can read them
-    globals()['SKIP_WATER_MASK']        = SKIP_WATER_MASK
-    globals()['WATER_METHOD']           = WATER_METHOD
-    globals()['WATER_FIXED_THRESHOLD']  = int(WATER_FIXED_THRESHOLD)
-
-    # Update threshold globals
-    CNN_THRESHOLD  = float(cnn_threshold)
-    UNET_THRESHOLD = float(unet_threshold)
-    MIN_AREA       = int(min_area)
-    YOLO_CONFIDENCE= float(yolo_conf)
-    globals()['CNN_THRESHOLD']  = CNN_THRESHOLD
-    globals()['UNET_THRESHOLD'] = UNET_THRESHOLD
-    globals()['MIN_AREA']       = MIN_AREA
+    # Model status badges
+    st.markdown("<p class='section-label'>Model Status</p>", unsafe_allow_html=True)
+    st.markdown(f"{'✅' if cnn_ok  is True else '❌'} **CNN**  `{CNN_PATH.name}`")
+    st.markdown(f"{'✅' if unet_ok is True else '❌'} **U-Net** `{UNET_PATH.name}`")
+    st.markdown(f"{'✅' if yolo_ok is True else '⚠️'} **YOLO** `{YOLO_PATH.name}`")
 
     st.divider()
-    st.subheader("📖 Colour Guide")
+
+    # Detection sensitivity
+    st.markdown("<p class='section-label'>Detection Sensitivity</p>", unsafe_allow_html=True)
+    cnn_thr  = st.slider("CNN threshold",          0.0, 1.0, CNN_THRESHOLD,  0.01,
+                          help="Minimum CNN confidence to trigger segmentation")
+    unet_thr = st.slider("Segmentation threshold", 0.0, 1.0, UNET_THRESHOLD, 0.01,
+                          help="Lower = more oil detected · Higher = stricter")
+    min_area = st.number_input("Min spill size (px)", 0, value=MIN_AREA, step=50,
+                                help="Blobs smaller than this are ignored")
+    yolo_cf  = st.slider("YOLO confidence",         0.0, 1.0, YOLO_CONF,     0.01,
+                          help="Minimum YOLO bounding-box confidence")
+
+    st.divider()
+
+    # Visualisation
+    st.markdown("<p class='section-label'>Visualisation</p>", unsafe_allow_html=True)
+    show_outline = st.toggle("Oil boundary outline", value=True)
+
+    st.divider()
+
+    # Colour guide
+    st.markdown("<p class='section-label'>Colour Guide</p>", unsafe_allow_html=True)
     st.markdown("""
-    🟥 **Red** → Detected oil region  
-    ⬛ **Black outline** → Oil boundary  
-    🟨 **Yellow box** → YOLO localisation  
-    ⬜ **White mask** → Segmentation output  
+🟥 **Red fill** — oil region  
+⬛ **Black line** — oil boundary  
+🟨 **Cyan box** — YOLO detection  
+⬜ **White mask** — segmentation output  
     """)
 
-    st.divider()
-    st.subheader("🖍️ Visualisation")
-    outline_enabled = st.toggle("Show Oil Boundary Outline", value=True)
-    OUTLINE_COLOR   = (0, 0, 0)   # fixed black — appropriate for satellite imagery
-
-    st.divider()
-    st.subheader("📁 Loaded Models")
-    st.caption(f"🔵 CNN:   {CNN_MODEL_PATH.name}")
-    st.caption(f"🟢 U-Net: {UNET_MODEL_PATH.name}")
-    st.caption(f"🟠 YOLO:  {YOLO_MODEL_PATH.name}")
-
-
 # =================================================
-# MAIN — Upload
+# UPLOAD
 # =================================================
-st.subheader("📤 Upload SAR / Satellite Image")
-uploaded_file = st.file_uploader(
-    "Choose an image file", type=["jpg", "png", "jpeg"],
-    help="Upload a SAR or satellite image for oil spill detection"
+st.subheader("📤 Upload Image")
+uploaded = st.file_uploader(
+    "SAR or satellite image (JPG / PNG)",
+    type=["jpg", "jpeg", "png"],
 )
 
-if uploaded_file:
-    if cnn_model is None or unet_model is None:
-        st.error("❌ Required models not loaded.")
+# =================================================
+# WELCOME SCREEN  (no image yet)
+# =================================================
+if not uploaded:
+    st.info("Upload an image above to begin analysis.")
+
+    with st.expander("ℹ️ How it works"):
+        st.markdown("""
+**Step 1 — CNN classifier**  
+Checks whether the image contains an oil spill at all.
+If confidence is below the threshold, analysis stops here.
+
+**Step 2 — U-Net segmentation**  
+Produces a pixel-level mask highlighting the exact oil region.
+
+**Step 3 — YOLO detection** *(if model is loaded)*  
+Draws bounding boxes around detected oil patches for quick localisation.
+
+**Outputs**
+- Side-by-side: original · mask · overlay
+- Metrics: coverage %, component count, CNN score
+- Downloadable report PNG + individual images
+        """)
+    st.stop()
+
+# =================================================
+# INFERENCE
+# =================================================
+if cnn_model is None or unet_model is None:
+    st.error("❌ CNN or U-Net model failed to load — check model paths.")
+    st.stop()
+
+raw = np.frombuffer(uploaded.read(), np.uint8)
+img_bgr = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+safe_ts = timestamp.replace(":", "-").replace(" ", "_")
+
+st.image(img_rgb, caption="Uploaded image", use_container_width=True)
+
+with st.spinner("Running models…"):
+
+    batch    = preprocess(img_rgb)
+    cnn_prob = float(cnn_model.predict(batch, verbose=0)[0][0])
+
+    # --- CNN gate ---
+    if cnn_prob < cnn_thr:
+        st.success(f"✅ No oil spill detected  (CNN score: {cnn_prob:.3f} < threshold {cnn_thr})")
         st.stop()
 
-    bytes_data = np.frombuffer(uploaded_file.read(), np.uint8)
-    img_bgr    = cv2.imdecode(bytes_data, cv2.IMREAD_COLOR)
-    img_rgb    = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    st.warning(f"🚨 Oil spill detected  (CNN score: {cnn_prob:.3f})")
 
-    # FIX 4 — use_container_width instead of deprecated use_column_width
-    st.image(img_rgb, caption="Uploaded Image", use_container_width=True, clamp=True)
+    # --- U-Net ---
+    pred_prob = unet_model.predict(batch, verbose=0)[0].squeeze()
+    pred_prob, inverted = auto_invert(pred_prob)
+    if inverted:
+        st.info("ℹ️ U-Net polarity auto-corrected (model outputs high = background).")
 
-    safe_ts = timestamp.replace(":", "-").replace(" ", "_")
-    st.info("🔄 Processing image with all models...")
+    final_mask = postprocess_mask(pred_prob, unet_thr, int(min_area))
+    metrics    = compute_metrics(final_mask)
 
-    img_proc  = preprocess_image(img_rgb)
-    img_batch = np.expand_dims(img_proc, axis=0)
-
-    # -------------------------------------------------------
-    # STEP 1: CNN
-    # -------------------------------------------------------
-    cnn_prob = float(cnn_model.predict(img_batch, verbose=0)[0][0])
-
-    if cnn_prob < CNN_THRESHOLD:
-        st.success(f"✅ No Oil Spill Detected (CNN: {cnn_prob:.3f})")
-        st.info(f"Threshold = {CNN_THRESHOLD}. Image classified as clean.")
-        st.stop()
-
-    st.warning(f"🚨 Oil Spill Detected! (CNN: {cnn_prob:.3f})")
-    st.info("Running segmentation and localization models…")
-
-    # -------------------------------------------------------
-    # STEP 2: U-Net
-    # -------------------------------------------------------
-    pred_prob = unet_model.predict(img_batch, verbose=0)[0].squeeze()
-
-    # Debug view
-    if show_unet_raw:
-        try:
-            fig_raw, ax_raw = plt.subplots(figsize=(5, 5))
-            im = ax_raw.imshow(pred_prob, cmap='viridis')
-            ax_raw.set_title('U-Net Raw Probabilities')
-            ax_raw.axis('off')
-            fig_raw.colorbar(im, ax=ax_raw, fraction=0.046, pad=0.04)
-            st.pyplot(fig_raw)
-            plt.close(fig_raw)
-            st.write(f"min: {pred_prob.min():.4f}  max: {pred_prob.max():.4f}  mean: {pred_prob.mean():.4f}")
-
-            # Show intermediate masks
-            raw_mask   = (pred_prob > UNET_THRESHOLD).astype(np.uint8)
-            k          = np.ones((5, 5), np.uint8)
-            cleaned    = cv2.morphologyEx(raw_mask, cv2.MORPH_OPEN,  k)
-            cleaned    = cv2.morphologyEx(cleaned,  cv2.MORPH_CLOSE, k)
-            img_rsz    = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE))
-            water_mask = land_water_mask(img_rsz, skip=SKIP_WATER_MASK)
-
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.image((raw_mask * 255).astype(np.uint8),   clamp=True, caption='Raw binary mask')
-            with c2:
-                st.image((cleaned  * 255).astype(np.uint8),   clamp=True, caption='Cleaned (morphology)')
-            with c3:
-                st.image((water_mask * 255).astype(np.uint8), clamp=True, caption=f'Water mask (skip={SKIP_WATER_MASK})')
-
-            st.write(f"Raw: {raw_mask.sum()} px | Cleaned: {cleaned.sum()} px | Water: {water_mask.sum()} px")
-
-            # Download debug files
-            dl1, dl2, dl3 = st.columns(3)
-            for col, arr, name in zip(
-                [dl1, dl2, dl3],
-                [raw_mask, cleaned, water_mask],
-                ['raw_mask', 'cleaned_mask', 'water_mask']
-            ):
-                buf_dbg = io.BytesIO()
-                Image.fromarray((arr * 255).astype(np.uint8)).save(buf_dbg, format='PNG')
-                buf_dbg.seek(0)
-                with col:
-                    st.download_button(f"⬇ {name}.png", buf_dbg, f"{name}_{safe_ts}.png", "image/png")
-
-            buf_np = io.BytesIO()
-            np.savez_compressed(buf_np, pred_prob=pred_prob,
-                                raw_mask=raw_mask, cleaned=cleaned, water_mask=water_mask)
-            buf_np.seek(0)
-            st.download_button("⬇ debug.npz", buf_np, f"unet_debug_{safe_ts}.npz")
-        except Exception as e:
-            st.warning(f"Debug display failed: {e}")
-
-    # -------------------------------------------------------
-    # FIX 3 — Polarity detection (mean-based, reliable)
-    # -------------------------------------------------------
-    if manual_invert:
-        pred_prob = 1.0 - pred_prob
-        st.info("⚠️ Manual inversion applied.")
-    elif auto_detect_polarity and pred_prob.mean() > 0.5:
-        pred_prob = 1.0 - pred_prob
-        st.info("⚠️ Auto-polarity: inverted (model outputs high=background).")
-
-    # Threshold selection
-    if use_auto_threshold:
-        st.info("⟳ Auto-selecting threshold…")
-        sel_thresh = pick_auto_threshold(pred_prob, img_rgb,
-                                         open_kernel=open_kernel_size,
-                                         close_kernel=close_kernel_size,
-                                         min_area=int(min_area))
-        st.info(f"✅ Auto threshold: {sel_thresh:.4f}")
-        final_mask = postprocess_mask(pred_prob, img_rgb,
-                                       threshold=sel_thresh,
-                                       open_kernel=open_kernel_size,
-                                       close_kernel=close_kernel_size,
-                                       min_area=int(min_area))
-    else:
-        final_mask = postprocess_mask(pred_prob, img_rgb,
-                                       threshold=unet_threshold,
-                                       open_kernel=open_kernel_size,
-                                       close_kernel=close_kernel_size,
-                                       min_area=int(min_area))
-
-    metrics = calculate_metrics(final_mask)
-
-    # -------------------------------------------------------
-    # STEP 3: YOLO
-    # -------------------------------------------------------
+    # --- YOLO ---
     yolo_results = None
     yolo_count   = 0
-
     if yolo_model is not None:
         try:
+            if yolo_model.conf != yolo_cf:
+                yolo_model.conf = yolo_cf
             yolo_results = yolo_model(img_rgb, verbose=False)
-            if ULTRALYTICS_AVAILABLE:
-                yolo_count = len(yolo_results[0].boxes) if yolo_results else 0
-            else:
-                yolo_count = len(yolo_results.xyxy[0]) if hasattr(yolo_results, 'xyxy') else 0
-            st.success(f"✅ YOLO: {yolo_count} detection(s)")
+            yolo_count   = len(yolo_results[0].boxes) if yolo_results else 0
         except Exception as e:
-            st.warning(f"⚠️ YOLO error: {e}")
+            st.warning(f"⚠️ YOLO inference failed: {e}")
 
-    # -------------------------------------------------------
-    # VISUALISATIONS
-    # -------------------------------------------------------
-    st.divider()
-    st.subheader("🎨 Visual Analysis")
+    # --- Build visuals ---
+    overlay      = build_overlay(img_rgb, final_mask, outline=show_outline)
+    overlay_yolo = draw_yolo_boxes(overlay, yolo_results)
 
-    overlay        = create_overlay(img_rgb, final_mask,
-                                    draw_outline=outline_enabled,
-                                    outline_color=OUTLINE_COLOR)
-    legend_overlay = create_legend_overlay(img_rgb, final_mask, yolo_results, timestamp)
+# =================================================
+# RESULTS — VISUAL
+# =================================================
+st.divider()
+st.subheader("🎨 Visual Analysis")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        # FIX 4 applied throughout
-        st.image(img_rgb,           caption="📷 Original Image",             use_container_width=True, clamp=True)
-    with col2:
-        st.image(final_mask * 255,  caption="⚪ U-Net Mask (White=Oil)",      use_container_width=True, clamp=True)
-    with col3:
-        st.image(overlay,           caption="🔴 Overlay (Red=Oil)",           use_container_width=True, clamp=True)
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.image(img_rgb,                caption="📷 Original",          use_container_width=True)
+with c2:
+    st.image(final_mask * 255,       caption="⚪ U-Net Mask",         use_container_width=True, clamp=True)
+with c3:
+    st.image(overlay_yolo,           caption="🔴 Overlay + YOLO",     use_container_width=True)
 
-    st.image(legend_overlay, caption="📊 Complete Analysis with Legend", use_container_width=True, clamp=True)
+# =================================================
+# RESULTS — METRICS
+# =================================================
+st.divider()
+st.subheader("📊 Detection Metrics")
 
-    # -------------------------------------------------------
-    # METRICS
-    # -------------------------------------------------------
-    st.divider()
-    st.subheader("📈 Detection Results")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Oil Coverage",      f"{metrics['oil_pct']:.2f}%")
+m2.metric("CNN Score",         f"{cnn_prob:.3f}")
+m3.metric("Spill Regions",     metrics["n_comps"])
+m4.metric("YOLO Detections",   yolo_count)
 
-    oil_percent   = metrics['oil_percentage']
-    water_percent = 100 - oil_percent
+col_pie, col_chart = st.columns([1, 2])
+with col_pie:
+    st.pyplot(pie_chart(metrics["oil_pct"], "Oil vs Clean Water"))
+    plt.close()
+with col_chart:
+    st.pyplot(summary_chart(metrics, cnn_prob, yolo_count))
+    plt.close()
 
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        fig_pie, ax = plt.subplots(figsize=(6, 5))
-        ax.pie([oil_percent, water_percent],
-               labels=["Oil Spill", "Clean Water"],
-               autopct="%1.1f%%",
-               colors=["#ff4d4d", "#4CAF50"],
-               explode=(0.08, 0), startangle=90,
-               textprops={"fontsize": 10})
-        ax.set_title("U-Net: Oil Spill Area Distribution", fontsize=12, fontweight='bold')
-        st.pyplot(fig_pie)
-        plt.close(fig_pie)
+# =================================================
+# RESULTS — MODEL DETAIL  (expanders)
+# =================================================
+st.divider()
+st.subheader("ℹ️ Model Details")
 
-    with col_c2:
-        st.markdown("**📊 Detection Metrics**")
-        mc1, mc2 = st.columns(2)
-        with mc1:
-            st.metric("Oil Spill %",    f"{oil_percent:.2f}%")
-            st.metric("CNN Confidence", f"{cnn_prob:.3f}")
-        with mc2:
-            st.metric("Total Components", metrics['total_components'])
-            st.metric("YOLO Detections",  yolo_count)
+with st.expander("🧠 CNN — Binary Classifier"):
+    st.markdown(f"""
+| Field | Value |
+|---|---|
+| Confidence score | `{cnn_prob:.4f}` |
+| Threshold | `{cnn_thr}` |
+| Decision | {'🚨 Oil detected' if cnn_prob >= cnn_thr else '✅ Clean'} |
+| Model file | `{CNN_PATH.name}` |
+""")
 
-        st.markdown("**📍 Component Analysis**")
-        total_px = metrics['total_oil_pixels'] / (oil_percent / 100) if oil_percent > 0 else 0
+with st.expander("🎯 U-Net — Segmentation"):
+    st.markdown(f"""
+| Field | Value |
+|---|---|
+| Oil coverage | `{metrics['oil_pct']:.2f}%` |
+| Spill regions | `{metrics['n_comps']}` |
+| Largest region | `{metrics['largest_px']} px` |
+| Total oil pixels | `{metrics['oil_px']}` |
+| Threshold used | `{unet_thr}` |
+| Min blob size | `{int(min_area)} px` |
+| Polarity inverted | `{inverted}` |
+| Model file | `{UNET_PATH.name}` |
+""")
+
+with st.expander("📍 YOLO — Object Detection"):
+    if yolo_model:
         st.markdown(f"""
-- **Largest Component Area**: {metrics['largest_component_area']} pixels
-- **Total Oil Pixels**: {metrics['total_oil_pixels']} pixels
-- **Total Image Pixels**: {total_px:.0f}
+| Field | Value |
+|---|---|
+| Detections | `{yolo_count}` |
+| Confidence threshold | `{yolo_cf}` |
+| Status | ✅ Loaded |
+| Model file | `{YOLO_PATH.name}` |
 """)
+    else:
+        st.warning(f"⚠️ YOLO unavailable — {yolo_ok}")
 
-    st.divider()
-    st.subheader("📉 Multi-Model Analysis Chart")
-    fig_results = create_results_chart(metrics, cnn_prob, yolo_count)
-    st.pyplot(fig_results)
-    plt.close(fig_results)
+# =================================================
+# DOWNLOADS
+# =================================================
+st.divider()
+st.subheader("⬇️ Download Results")
 
-    # -------------------------------------------------------
-    # DOWNLOADS
-    # -------------------------------------------------------
-    st.divider()
-    st.subheader("⬇️ Download Results")
+report_png = fig_to_bytes(
+    report_figure(img_rgb, final_mask, overlay_yolo, metrics, cnn_prob, yolo_count, timestamp)
+)
 
-    fig_dl = plt.figure(figsize=(14, 8))
-    gs     = fig_dl.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
+st.download_button(
+    "⬇️ Full Analysis Report (PNG)",
+    report_png,
+    f"oil_spill_report_{safe_ts}.png",
+    "image/png",
+    use_container_width=True,
+)
 
-    ax_orig = fig_dl.add_subplot(gs[0, 0])
-    ax_orig.imshow(img_rgb); ax_orig.set_title("Original Image", fontweight='bold'); ax_orig.axis("off")
+d1, d2, d3 = st.columns(3)
+with d1:
+    st.download_button("📷 Original",  img_to_bytes(img_rgb),
+                       f"original_{safe_ts}.png",  "image/png", use_container_width=True)
+with d2:
+    st.download_button("⚪ Mask",      img_to_bytes((final_mask * 255).astype(np.uint8)),
+                       f"mask_{safe_ts}.png",      "image/png", use_container_width=True)
+with d3:
+    st.download_button("🔴 Overlay",   img_to_bytes(overlay_yolo),
+                       f"overlay_{safe_ts}.png",   "image/png", use_container_width=True)
 
-    ax_mask = fig_dl.add_subplot(gs[0, 1])
-    ax_mask.imshow(final_mask * 255, cmap='gray')
-    ax_mask.set_title("U-Net Mask", fontweight='bold'); ax_mask.axis("off")
-
-    ax_ov = fig_dl.add_subplot(gs[0, 2])
-    ax_ov.imshow(overlay); ax_ov.set_title("Overlay", fontweight='bold'); ax_ov.axis("off")
-
-    ax_pie2 = fig_dl.add_subplot(gs[1, 0])
-    ax_pie2.pie([oil_percent, water_percent], labels=["Oil","Water"],
-                autopct="%1.0f%%", colors=["#ff4d4d","#4CAF50"],
-                explode=(0.05,0), startangle=90, textprops={"fontsize":8})
-    ax_pie2.set_title("Area Distribution", fontweight='bold', fontsize=9)
-
-    ax_txt = fig_dl.add_subplot(gs[1, 1]); ax_txt.axis("off")
-    ax_txt.text(0.1, 0.5, f"""
-DETECTION RESULTS
-
-Timestamp: {timestamp}
-
-CNN Confidence:  {cnn_prob:.3f}
-U-Net Oil %:     {oil_percent:.2f}%
-YOLO Detections: {yolo_count}
-
-Components:   {metrics['total_components']}
-Largest Comp: {metrics['largest_component_area']} px
-Total Oil px: {metrics['total_oil_pixels']}
-""", fontfamily='monospace', fontsize=9, verticalalignment='center',
-        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-
-    ax_leg = fig_dl.add_subplot(gs[1, 2]); ax_leg.axis("off")
-    ax_leg.text(0.1, 0.5, """
-LEGEND
-
-🔴 Red Fill: Oil
-⚪ White: Oil Mask
-⬛ Black Outline: Boundary
-🟨 Yellow Box: YOLO
-
-Models:
-• CNN Classification
-• U-Net Segmentation
-• YOLO Detection
-""", fontfamily='monospace', fontsize=8, verticalalignment='center',
-        bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
-
-    fig_dl.suptitle("Oil Spill Detection — Comprehensive Analysis Report",
-                    fontsize=14, fontweight='bold', y=0.98)
-
-    buf = io.BytesIO()
-    fig_dl.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close(fig_dl)
-    buf.seek(0)
-
-    st.download_button("⬇️ Download Complete Analysis (PNG)", buf.getvalue(),
-                       f"oil_spill_analysis_{safe_ts}.png", "image/png")
-
-    dc1, dc2, dc3 = st.columns(3)
-    with dc1:
-        b = io.BytesIO(); Image.fromarray(img_rgb).save(b, "PNG"); b.seek(0)
-        st.download_button("📷 Original", b, f"original_{safe_ts}.png", "image/png")
-    with dc2:
-        b = io.BytesIO(); Image.fromarray((final_mask*255).astype(np.uint8)).save(b,"PNG"); b.seek(0)
-        st.download_button("⚪ Mask", b, f"mask_{safe_ts}.png", "image/png")
-    with dc3:
-        b = io.BytesIO(); Image.fromarray(overlay).save(b, "PNG"); b.seek(0)
-        st.download_button("🔴 Overlay", b, f"overlay_{safe_ts}.png", "image/png")
-
-    # -------------------------------------------------------
-    # MODEL INFO
-    # -------------------------------------------------------
-    st.divider()
-    st.subheader("ℹ️ Model Information")
-
-    with st.expander("🧠 CNN Classification Model"):
-        st.markdown(f"""
-**Purpose**: Binary classification (Oil / No Oil)
-**Confidence**: {cnn_prob:.4f}
-**Decision**: {'🚨 Oil Spill Detected' if cnn_prob >= CNN_THRESHOLD else '✅ No Oil'}
-**Threshold**: {CNN_THRESHOLD}
-**Path**: `{CNN_MODEL_PATH}`
-""")
-
-    with st.expander("🎯 U-Net Segmentation Model"):
-        st.markdown(f"""
-**Purpose**: Pixel-wise segmentation
-**Oil Coverage**: {oil_percent:.2f}%
-**Components**: {metrics['total_components']}
-**Largest**: {metrics['largest_component_area']} px
-**Threshold**: {UNET_THRESHOLD}
-**Min Area**: {MIN_AREA} px
-**Water Mask Skipped**: {SKIP_WATER_MASK}
-**Path**: `{UNET_MODEL_PATH}`
-""")
-
-    with st.expander("📍 YOLO Detection Model"):
-        if yolo_model:
-            st.markdown(f"""
-**Detections**: {yolo_count}
-**Conf Threshold**: {YOLO_CONFIDENCE}
-**Status**: ✅ Loaded
-**Path**: `{YOLO_MODEL_PATH}`
-""")
-        else:
-            st.warning("⚠️ YOLO not available")
-
-    st.divider()
-    st.caption("🛢️ Analysis complete!")
-
-else:
-    st.info("👈 Upload a SAR or satellite image to begin.")
-
-    with st.expander("ℹ️ How to Use"):
-        st.markdown("""
-### Multi-Model Oil Spill Detection
-
-**1️⃣ CNN** — Binary classification (oil / no oil)
-**2️⃣ U-Net** — Pixel-level segmentation
-**3️⃣ YOLO** — Bounding-box localization
-
-### Key Setting: Water Mask
-For **RGB satellite images** (docks, ships, sand visible) → ✅ **Skip water mask** (default).
-For **dark-water SAR** → uncheck Skip and choose Otsu or fixed threshold.
-
-### Formats: JPG / PNG
-""")
-
-# Footer
+# =================================================
+# FOOTER
+# =================================================
 st.divider()
 st.markdown("""
-<div style='text-align:center;color:gray;font-size:.85rem;'>
-<p>🛢️ AI-Driven Oil Spill Detection | TensorFlow · YOLO · Streamlit</p>
-<p>CNN Classification | U-Net Segmentation | YOLO Detection</p>
+<div style='text-align:center;color:#888;font-size:.82rem;'>
+    🛢️ AI-Driven Oil Spill Detection &nbsp;·&nbsp;
+    TensorFlow &nbsp;·&nbsp; YOLO &nbsp;·&nbsp; Streamlit
 </div>
 """, unsafe_allow_html=True)
