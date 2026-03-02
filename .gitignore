@@ -1,5 +1,7 @@
 # Dataset
+*.zip
 dataset_1/
+dataset_2/
 src/data/processed/
 yolo_dataset/
 
@@ -40,3 +42,9 @@ papers/
 
 
 app-old.py
+
+LaTeX2e+Proceedings+Templates+download/
+
+*.txt
+
+zzz/
