@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/models/cnn.py
 
+# D1 SPECIFIC CNN ARCHITECTURE
+
 import tensorflow as tf
 from tensorflow.keras import layers, models
 
