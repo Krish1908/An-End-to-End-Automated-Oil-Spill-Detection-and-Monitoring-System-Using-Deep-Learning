@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/testing/test_cnn.py
 
+# D1 SPECIFIC CNN TESTING SCRIPT
+
 import os
 import sys
 import numpy as np
