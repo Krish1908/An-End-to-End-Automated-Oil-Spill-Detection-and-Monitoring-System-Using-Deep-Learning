@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/data/fix_manual_masks.py
 
+# MANUAL ONLINE IMAGE MASK GENERATION
+
 import os
 import cv2
 import numpy as np
