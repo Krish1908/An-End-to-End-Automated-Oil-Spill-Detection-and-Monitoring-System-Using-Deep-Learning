@@ -1,5 +1,8 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/data/preprocess.py
 
+# D1 SPECIFIC PREPROCESSING
+
+
 import os
 import cv2
 import numpy as np
