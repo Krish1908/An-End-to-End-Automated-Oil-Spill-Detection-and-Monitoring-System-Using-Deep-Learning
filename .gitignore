@@ -4,6 +4,7 @@ dataset_1/
 dataset_2/
 src/data/processed/
 yolo_dataset/
+merged-dataset/
 
 # Model weights
 *.keras
@@ -11,8 +12,8 @@ yolo_dataset/
 *.pt
 
 # Results
-models/cnn/test_results/
-results/
+models-d1/cnn/test_results/
+results-d1/
 inference/
 inference00/
 unet_predictions/
