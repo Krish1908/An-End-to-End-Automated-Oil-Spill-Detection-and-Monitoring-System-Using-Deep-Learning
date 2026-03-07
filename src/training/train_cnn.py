@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/training/train_cnn.py
 
+# D1 SPECIFIC CNN TRAINING SCRIPT
+
 import os
 import sys
 import tensorflow as tf
