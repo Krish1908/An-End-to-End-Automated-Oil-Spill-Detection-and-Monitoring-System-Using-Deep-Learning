@@ -6,6 +6,8 @@ src/data/processed/
 yolo_dataset/
 merged-dataset/
 
+merge-dataset.py
+
 # Model weights
 *.keras
 *.h5
