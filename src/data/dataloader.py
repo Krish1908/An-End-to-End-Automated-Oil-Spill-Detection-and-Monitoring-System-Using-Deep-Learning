@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/data/dataloader.py
 
+# D1 SPECIFIC DATALOADER
+
 import os
 import tensorflow as tf
 import numpy as np
