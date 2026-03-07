@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/data/domain_adaptation.py
 
+# MANUAL ONLINE IMAGES DOMAIN ADAPTATION PIPELINE
+
 import os
 import cv2
 import numpy as np
