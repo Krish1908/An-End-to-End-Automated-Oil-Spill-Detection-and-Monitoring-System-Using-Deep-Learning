@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/post-processing/predict_pipeline.py
 
+# D1 SPECIFIC INFERENCE PIPELINE
+
 import os
 import cv2
 import numpy as np
