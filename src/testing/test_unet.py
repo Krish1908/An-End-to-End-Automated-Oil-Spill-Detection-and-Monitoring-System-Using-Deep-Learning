@@ -1,5 +1,7 @@
 # /content/drive/MyDrive/OIL-SPILL-8/src/testing/test_unet.py
 
+# D1 SPECIFIC U-NET TESTING SCRIPT
+
 import os
 import sys
 import numpy as np
