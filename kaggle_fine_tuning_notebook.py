@@ -1,3 +1,7 @@
+
+
+# KAGGLE FINE TUNE - D1 + MANUAL ONLINE IMAGES
+
 import os
 import tensorflow as tf
 import numpy as np
