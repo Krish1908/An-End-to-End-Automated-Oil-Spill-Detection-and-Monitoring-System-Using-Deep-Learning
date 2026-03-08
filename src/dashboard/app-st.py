@@ -41,9 +41,9 @@ CLOSE_KERNEL   = 5
 # Update these paths to match your machine.
 # YOLO_REPO_PATH must point to the yolov5/ folder already inside your project.
 # ──────────────────────────────────────────────────────────────────────────────
-CNN_PATH       = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\cnn\cnn_classifier.keras")
-UNET_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\unet\unet_segmentation.keras")
-YOLO_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models\yolo\best.pt")
+CNN_PATH       = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\cnn\cnn_classifier.keras")
+UNET_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\unet\unet_segmentation.keras")
+YOLO_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\yolo\best.pt")
 YOLO_REPO_PATH = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\yolov5")
 
 # =================================================
