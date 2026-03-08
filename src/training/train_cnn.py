@@ -38,7 +38,7 @@ BATCH_SIZE = 16
 EPOCHS = 40
 LEARNING_RATE = 1e-4
 
-MODEL_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models/cnn"
+MODEL_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/cnn"
 MODEL_SAVE_PATH = f"{MODEL_DIR}/cnn_classifier.keras"
 PLOT_SAVE_PATH = f"{MODEL_DIR}/cnn_training_plot.png"
 

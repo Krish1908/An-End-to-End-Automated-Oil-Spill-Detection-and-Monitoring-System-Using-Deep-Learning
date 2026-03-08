@@ -14,9 +14,9 @@ import tensorflow as tf
 
 BASE_DIR = "/content/drive/MyDrive/OIL-SPILL-8"
 
-YOLO_WEIGHTS = f"{BASE_DIR}/models/yolo/best.pt"
-CNN_MODEL_PATH = f"{BASE_DIR}/models/cnn/cnn_classifier.keras"
-UNET_MODEL_PATH = f"{BASE_DIR}/models/unet/unet_segmentation.keras"
+YOLO_WEIGHTS = f"{BASE_DIR}/models-d1/yolo/best.pt"
+CNN_MODEL_PATH = f"{BASE_DIR}/models-d1/cnn/cnn_classifier.keras"
+UNET_MODEL_PATH = f"{BASE_DIR}/models-d1/unet/unet_segmentation.keras"
 
 TEST_DIR = f"{BASE_DIR}/src/data/processed/test/images"
 RESULTS_DIR = f"{BASE_DIR}/results/inference"

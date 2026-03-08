@@ -15,9 +15,9 @@ PROJECT_ROOT = "/content/drive/MyDrive/OIL-SPILL-8/src"
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-TEST_IMG_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed/test/images"
-MODEL_PATH   = "/content/drive/MyDrive/OIL-SPILL-8/models/cnn/cnn_classifier.keras"
-SAVE_DIR     = "/content/drive/MyDrive/OIL-SPILL-8/models/cnn/test_results"
+TEST_IMG_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d1/test/images"
+MODEL_PATH   = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/cnn/cnn_classifier.keras"
+SAVE_DIR     = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/cnn/test_results"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 

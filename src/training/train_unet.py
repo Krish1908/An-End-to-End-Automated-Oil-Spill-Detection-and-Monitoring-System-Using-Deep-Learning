@@ -38,7 +38,7 @@ BATCH_SIZE = 8
 EPOCHS = 40
 LEARNING_RATE = 1e-4
 
-MODEL_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models/unet"
+MODEL_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/unet"
 MODEL_SAVE_PATH = f"{MODEL_DIR}/unet_segmentation.keras"
 
 os.makedirs(MODEL_DIR, exist_ok=True)

@@ -21,10 +21,10 @@ from models.unet import dice_coef
 # ---------------------------------------------------
 # PATH CONFIG
 # ---------------------------------------------------
-MODEL_PATH = "/content/drive/MyDrive/OIL-SPILL-8/models/unet/unet_segmentation.keras"
+MODEL_PATH = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/unet/unet_segmentation.keras"
 
-TEST_IMG_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed/test/images"
-SAVE_DIR = "/content/drive/MyDrive/OIL-SPILL-8/results/unet_predictions"
+TEST_IMG_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d1/test/images"
+SAVE_DIR = "/content/drive/MyDrive/OIL-SPILL-8/results-d1/unet_predictions"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 

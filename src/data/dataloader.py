@@ -10,7 +10,7 @@ import numpy as np
 # PATHS
 # ---------------------------------------------------
 
-PROCESSED_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed"
+PROCESSED_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d1"
 IMG_SIZE = (256, 256)
 
 AUTOTUNE = tf.data.AUTOTUNE

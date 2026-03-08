@@ -15,7 +15,7 @@ import shutil
 
 BASE_DIR = "/content/drive/MyDrive/OIL-SPILL-8"
 RAW_DATASET_DIR = os.path.join(BASE_DIR, "dataset_1")
-OUTPUT_DIR = os.path.join(BASE_DIR, "src/data/processed")
+OUTPUT_DIR = os.path.join(BASE_DIR, "src/data/processed-d1")
 COLOR_TXT_PATH = os.path.join(RAW_DATASET_DIR, "label_colors.txt")
 
 IMG_SIZE = None  # KEEP ORIGINAL SIZE (important for YOLO)
