@@ -2,6 +2,8 @@
 *.zip
 dataset_1/
 dataset_2/
+dataset_3/
+dataset_4/
 src/data/processed/
 yolo_dataset/
 merged-dataset/
