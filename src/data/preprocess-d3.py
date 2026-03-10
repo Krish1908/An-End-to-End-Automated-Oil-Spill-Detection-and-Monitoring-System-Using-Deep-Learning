@@ -12,9 +12,9 @@ import yaml
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-BASE_DIR      = "/content/drive/MyDrive/OIL-SPILL-8"
-DATASET_DIR   = f"{BASE_DIR}/dataset_3"
-OUTPUT_DIR    = f"{BASE_DIR}/src/data/processed-d3"
+BASE_DIR = "/content"
+DATASET_DIR = "/content/dataset_3"
+OUTPUT_DIR = "/content/processed-d3"
 
 CNN_UNET_SIZE = (256, 256)
 YOLO_SIZE     = (640, 640)
