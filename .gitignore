@@ -5,6 +5,7 @@ dataset_2/
 dataset_3/
 dataset_4/
 src/data/processed-d1/
+src/data/processed-d3/
 yolo_dataset/
 merged-dataset/
 
@@ -54,3 +55,4 @@ LaTeX2e+Proceedings+Templates+download/
 zzz/
 
 domain_shift_results_3_4/
+src/data/mask_to_yolo.py
