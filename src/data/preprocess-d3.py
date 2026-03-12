@@ -12,9 +12,9 @@ import yaml
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-BASE_DIR = "D:\Coding\SEM-8-NEW\OIL-SPILL"
-DATASET_DIR = "D:\Coding\SEM-8-NEW\OIL-SPILL\dataset_3"
-OUTPUT_DIR = "D:\Coding\SEM-8-NEW\OIL-SPILL\dataset_3\processed-d3"
+BASE_DIR = "/content"
+DATASET_DIR = "/content/dataset_3"
+OUTPUT_DIR = "/content/processed-d3"
 
 CNN_UNET_SIZE = (256, 256)
 YOLO_SIZE     = (640, 640)
