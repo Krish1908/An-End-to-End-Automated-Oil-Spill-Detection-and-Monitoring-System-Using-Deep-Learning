@@ -1,56 +1,103 @@
-# Dataset
-*.zip
+# Dataset directories
 dataset_1/
 dataset_2/
 dataset_3/
 dataset_4/
+*.zip
+
+# Processed data directories
 src/data/processed-d1/
 src/data/processed-d3/
 src/data/processed-d4/
 
-# Model weights
+# Model directories
 models-d1-rgb/
 models-sar/
+
+# Model files
 *.keras
 *.h5
 *.pt
+*.pth
 
-# Results
-models-d1-rgb/
+# Results and outputs
+results/
+runs/
+logs/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+.pytest_cache/
 
-# OS
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
+# Temporary files
+*.tmp
+*.temp
+*.log
 
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
 
-
-
-zzz/
-
-
-*.png
-*.xlsx
+# YOLOv5 specific (keep external library but ignore weights)
 yolov5/
+!yolov5/*.py
+!yolov5/*.yaml
+!yolov5/*.txt
+!yolov5/*.sh
+!yolov5/*.md
+!yolov5/README*
+yolov5/**/*.pt
+yolov5/**/*.pth
+yolov5/**/*.weights
 
-*.md
-
+# Documentation and analysis files
+zzz/
 *.pdf
-
 *.tex
+*.docx
+*.xlsx
+*.png
+*.jpg
+*.jpeg
 
-
-
+# Old/unused files
+*.old
+*.bak
 app-old.py
 
+# Git files
+.git/
+.gitignore
 
-*.txt
+# System files
+*.dll
+*.exe
+*.so
+*.dylib
 
-domain-check-claude.py
-domain-check-gpt1.py
+# Cache directories
+.cache/
+*.cache/
