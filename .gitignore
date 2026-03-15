@@ -7,9 +7,6 @@ dataset_4/
 src/data/processed-d1/
 src/data/processed-d3/
 src/data/processed-d4/
-yolo_dataset/
-merged-dataset/
-
 
 # Model weights
 *.keras
@@ -17,11 +14,7 @@ merged-dataset/
 *.pt
 
 # Results
-models-d1/cnn/test_results/
-results-d1/
-inference/
-inference00/
-unet_predictions/
+models-d1-rgb/
 
 # Python
 __pycache__/
@@ -34,6 +27,12 @@ __pycache__/
 Thumbs.db
 
 
+
+
+
+zzz/
+
+
 *.png
 *.xlsx
 yolov5/
@@ -44,16 +43,12 @@ yolov5/
 
 *.tex
 
-papers/
 
 
 app-old.py
 
-LaTeX2e+Proceedings+Templates+download/
 
 *.txt
 
-zzz/
-
-domain_shift_results_3_4/
-src/data/mask_to_yolo.py
+domain-check-claude.py
+domain-check-gpt1.py
