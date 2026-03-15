@@ -13,7 +13,7 @@ PROJECT_ROOT = "/content/drive/MyDrive/OIL-SPILL-8/src"
 sys.path.append(PROJECT_ROOT)
 
 from models.unet import build_unet, bce_dice_loss, dice_coef
-from data.dataloader import create_unet_dataset
+from data.dataloader_rgb import create_unet_dataset
 
 # ---------------------------------------------------
 # CONFIGURATION

@@ -38,7 +38,7 @@ if PROJECT_ROOT not in sys.path:
 # IMPORT PROJECT MODULES
 # ---------------------------------------------------
 
-from data.dataloader_cnn import create_dataset, load_class_weights
+from data.dataloader_cnn_sar import create_dataset, load_class_weights
 from models.cnn import build_cnn_model
 
 
