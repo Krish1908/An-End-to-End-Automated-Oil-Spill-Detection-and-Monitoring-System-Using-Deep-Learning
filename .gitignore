@@ -9,6 +9,8 @@ src/data/processed-d3/
 src/data/processed-d4/
 
 # Model weights
+models-d1-rgb/
+models-sar/
 *.keras
 *.h5
 *.pt
