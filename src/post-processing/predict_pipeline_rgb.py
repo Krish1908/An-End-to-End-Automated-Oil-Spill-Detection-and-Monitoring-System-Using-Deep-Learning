@@ -12,7 +12,7 @@ import tensorflow as tf
 # PATHS
 # ---------------------------------------------------
 
-BASE_DIR = "/content/drive/MyDrive/OIL-SPILL-8"
+BASE_DIR = "."
 
 YOLO_WEIGHTS = f"{BASE_DIR}/models-d1/yolo/best.pt"
 CNN_MODEL_PATH = f"{BASE_DIR}/models-d1/cnn/cnn_classifier.keras"
