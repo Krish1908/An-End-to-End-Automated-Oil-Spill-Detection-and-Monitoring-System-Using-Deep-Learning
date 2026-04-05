@@ -1,6 +1,5 @@
-# ============================================================
-# TRAIN UNET SAR SEGMENTATION (SINGLE FILE FOR KAGGLE)
-# ============================================================
+# src/training/train_unet_sar.py
+# TRAIN UNET SAR SEGMENTATION
 
 import os
 import tensorflow as tf

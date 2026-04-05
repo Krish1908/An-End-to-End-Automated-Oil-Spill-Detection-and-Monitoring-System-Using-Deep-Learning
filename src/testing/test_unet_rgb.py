@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/testing/test_unet.py
+# src/testing/test_unet_rgb.py
 
 # D1 SPECIFIC U-NET TESTING SCRIPT
 

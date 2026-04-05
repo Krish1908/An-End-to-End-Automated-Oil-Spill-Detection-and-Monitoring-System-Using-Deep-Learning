@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/data/preprocess_d4.py
+# src/data/preprocess-d4.py
 #
 # D4 SPECIFIC PREPROCESSING — CSIRO Sentinel-1 SAR Oil Spill Dataset
 

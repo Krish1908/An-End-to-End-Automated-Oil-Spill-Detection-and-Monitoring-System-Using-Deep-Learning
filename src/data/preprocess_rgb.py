@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/data/preprocess.py
+# src/data/preprocess_rgb.py
 
 # D1 SPECIFIC PREPROCESSING
 

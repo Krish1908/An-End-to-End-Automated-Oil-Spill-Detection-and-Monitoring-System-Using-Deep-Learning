@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/training/train_unet.py
+# src/training/train_unet_rgb.py
 
 # D1 SPECIFIC U-NET TRAINING SCRIPT
 

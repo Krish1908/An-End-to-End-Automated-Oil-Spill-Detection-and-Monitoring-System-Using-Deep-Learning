@@ -1,4 +1,4 @@
-# evaluate_unet_sar_kaggle_gpu.py
+# src/testing/test_unet_sar.py
 
 import os
 import sys

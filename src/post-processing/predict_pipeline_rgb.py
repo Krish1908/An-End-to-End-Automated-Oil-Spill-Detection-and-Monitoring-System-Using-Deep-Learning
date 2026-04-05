@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/post-processing/predict_pipeline.py
+# src/post-processing/predict_pipeline_rgb.py
 
 # D1 SPECIFIC INFERENCE PIPELINE
 

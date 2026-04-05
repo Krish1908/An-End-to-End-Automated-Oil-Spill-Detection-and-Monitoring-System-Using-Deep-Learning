@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/data/preprocess_d3.py
+# src/data/preprocess-d3.py
 
 # D3 SPECIFIC PREPROCESSING — Zenodo 15298010 (Refined Deep-SAR SOS)
 

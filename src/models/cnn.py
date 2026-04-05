@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/models/cnn.py
+# src/models/cnn.py
 
 # D1 SPECIFIC CNN ARCHITECTURE
 

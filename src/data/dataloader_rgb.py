@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/data/dataloader.py
+# src/data/dataloader_rgb.py
 
 # D1 SPECIFIC DATALOADER
 

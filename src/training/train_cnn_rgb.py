@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/training/train_cnn.py
+# src/training/train_cnn_rgb.py
 
 # D1 SPECIFIC CNN TRAINING SCRIPT
 

@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/training/train_cnn_sar.py
+# src/training/train_cnn_sar.py
 
 # CNN TRAINING SCRIPT FOR DATASET-D4
 

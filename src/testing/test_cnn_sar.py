@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/testing/test_cnn_sar.py
+# src/testing/test_cnn_sar.py
 
 # CNN TESTING SCRIPT FOR DATASET-D4
 

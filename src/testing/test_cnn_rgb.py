@@ -1,4 +1,4 @@
-# /content/drive/MyDrive/OIL-SPILL-8/src/testing/test_cnn.py
+# src/testing/test_cnn_rgb.py
 
 # D1 SPECIFIC CNN TESTING SCRIPT
 

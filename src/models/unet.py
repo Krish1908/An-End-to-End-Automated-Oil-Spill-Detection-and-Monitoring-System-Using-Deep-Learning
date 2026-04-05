@@ -1,4 +1,4 @@
-#/content/drive/MyDrive/OIL-SPILL-8/src/models/unet.py
+# src/models/unet.py
 
 # D1 SPECIFIC UNET ARCHITECTURE
 
