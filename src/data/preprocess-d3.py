@@ -12,9 +12,9 @@ import yaml
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-BASE_DIR = "/content"
-DATASET_DIR = "/content/dataset_3"
-OUTPUT_DIR = "/content/processed-d3"
+BASE_DIR = "."
+DATASET_DIR = "dataset_3"
+OUTPUT_DIR = "src/data/processed-d3"
 
 CNN_UNET_SIZE = (256, 256)
 YOLO_SIZE     = (640, 640)

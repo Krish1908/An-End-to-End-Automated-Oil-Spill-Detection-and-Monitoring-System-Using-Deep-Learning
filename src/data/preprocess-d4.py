@@ -14,10 +14,10 @@ from pathlib import Path
 # CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-BASE_DIR    = "/content/drive/MyDrive/OIL-SPILL-8"
-DATASET_DIR = "/content/dataset_4"
-D3_DIR      = "/content/dataset_3"           # for oil crop extraction
-OUTPUT_DIR  = "/content/src/data/processed-d4"
+BASE_DIR    = "."
+DATASET_DIR = "dataset_4"
+D3_DIR      = "dataset_3"           # for oil crop extraction
+OUTPUT_DIR  = "src/data/processed-d4"
 
 CNN_SIZE    = (256, 256)
 LEE_KERNEL  = 7

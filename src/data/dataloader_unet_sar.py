@@ -8,7 +8,7 @@ import tensorflow as tf
 # PATHS
 # ---------------------------------------------------
 
-PROCESSED_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d3/cnn_unet"
+PROCESSED_DIR = "src/data/processed-d3/cnn_unet"
 
 IMG_SIZE = (256, 256)
 

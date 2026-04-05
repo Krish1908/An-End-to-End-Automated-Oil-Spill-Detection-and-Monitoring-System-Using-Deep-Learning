@@ -10,7 +10,7 @@ import json
 # PATHS
 # ---------------------------------------------------
 
-PROCESSED_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d4"
+PROCESSED_DIR = "src/data/processed-d4"
 IMG_SIZE = (256, 256)
 
 AUTOTUNE = tf.data.AUTOTUNE
