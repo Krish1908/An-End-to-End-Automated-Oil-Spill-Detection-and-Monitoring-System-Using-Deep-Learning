@@ -21,7 +21,7 @@ print("GPUs:", gpus)
 # DATASET PATH (KAGGLE INPUT)
 # ============================================================
 
-PROCESSED_DIR = "/kaggle/input/datasets/sanjaykrishnatn/processed-oil-spill/processed-d3/processed-d3/cnn_unet"
+PROCESSED_DIR = "src/data/processed-d3/cnn_unet"
 IMG_SIZE = (256,256)
 AUTOTUNE = tf.data.AUTOTUNE
 
@@ -206,7 +206,7 @@ BATCH_SIZE = 8
 EPOCHS = 40
 LR = 1e-4
 
-OUTPUT_DIR = "/kaggle/working/unet_output"
+OUTPUT_DIR = "models-sar/unet"
 os.makedirs(OUTPUT_DIR,exist_ok=True)
 
 MODEL_PATH = os.path.join(OUTPUT_DIR,"unet_sar.keras")

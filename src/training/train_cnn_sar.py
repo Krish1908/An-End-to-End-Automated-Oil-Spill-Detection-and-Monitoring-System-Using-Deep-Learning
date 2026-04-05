@@ -28,7 +28,7 @@ else:
 # PROJECT ROOT
 # ---------------------------------------------------
 
-PROJECT_ROOT = "/content/drive/MyDrive/OIL-SPILL-8/src"
+PROJECT_ROOT = "src"
 
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
@@ -50,7 +50,7 @@ BATCH_SIZE = 16
 EPOCHS = 40
 LEARNING_RATE = 1e-4
 
-MODEL_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models-sar/cnn"
+MODEL_DIR = "models-sar/cnn"
 MODEL_SAVE_PATH = f"{MODEL_DIR}/cnn_classifier.keras"
 
 os.makedirs(MODEL_DIR, exist_ok=True)
