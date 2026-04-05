@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+# src/dashboard/app-st.py
+
 """
 AI-Driven Oil Spill Detection  —  Final Production Version
 Models : CNN (binary classification) · U-Net (segmentation) · YOLO (localisation)
-Author : (your name)
+Supports both RGB (optical) and SAR (radar) models
 """
 
 # =================================================
@@ -37,14 +38,20 @@ YOLO_CONF      = 0.5
 OPEN_KERNEL    = 5
 CLOSE_KERNEL   = 5
 
-# ── CHANGE 1 of 2 ─────────────────────────────────────────────────────────────
-# Update these paths to match your machine.
-# YOLO_REPO_PATH must point to the yolov5/ folder already inside your project.
 # ──────────────────────────────────────────────────────────────────────────────
-CNN_PATH       = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\cnn\cnn_classifier.keras")
-UNET_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\unet\unet_segmentation.keras")
-YOLO_PATH      = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\models-d1\yolo\best.pt")
-YOLO_REPO_PATH = Path(r"D:\Coding\SEM-8-NEW\OIL-SPILL\yolov5")
+# MODEL PATHS (Repository-relative)
+# ──────────────────────────────────────────────────────────────────────────────
+YOLO_REPO_PATH = Path("yolov5")
+
+# RGB Models (Optical satellite imagery)
+RGB_CNN_PATH   = Path("models-d1-rgb/cnn/cnn_classifier_rgb.keras")
+RGB_UNET_PATH  = Path("models-d1-rgb/unet/unet_segmentation_rgb.keras")
+RGB_YOLO_PATH  = Path("models-d1-rgb/yolo/best_rgb.pt")
+
+# SAR Models (Radar satellite imagery)
+SAR_CNN_PATH   = Path("models-sar/cnn/cnn_classifier_sar.keras")
+SAR_UNET_PATH  = Path("models-sar/unet/unet_sar.keras")
+SAR_YOLO_PATH  = Path("models-sar/yolo/weights/best_sar.pt")
 
 # =================================================
 # PAGE CONFIG
@@ -79,46 +86,47 @@ st.markdown("""
     color: #888;
     margin-bottom: 0.3rem;
 }
+.active-model {
+    background-color: #1a5c2a;
+    padding: 0.5rem;
+    border-radius: 6px;
+    margin: 0.3rem 0;
+}
+.inactive-model {
+    opacity: 0.5;
+    margin: 0.3rem 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # =================================================
-# MODEL LOADING  (cached — runs once per session)
+# MODEL LOADING (cached — runs once per session)
 # =================================================
 @st.cache_resource
-def load_cnn():
+def load_keras_model(path):
+    """Load a Keras model with error handling."""
     try:
-        m = tf.keras.models.load_model(str(CNN_PATH))
+        m = tf.keras.models.load_model(str(path))
         return m, True
     except Exception as e:
         return None, str(e)
 
 @st.cache_resource
-def load_unet():
+def load_unet_model(path):
+    """Load a U-Net model with error handling."""
     try:
-        m = tf.keras.models.load_model(str(UNET_PATH), compile=False)
+        m = tf.keras.models.load_model(str(path), compile=False)
         return m, True
     except Exception as e:
         return None, str(e)
 
 @st.cache_resource
-def load_yolo():
-    # ── CHANGE 2 of 2 ───────────────────────────────────────────────────────
-    # WHY THIS FIX IS NEEDED:
-    #   Your best.pt was trained in Google Colab (Linux).
-    #   Colab saves path objects as PosixPath (Linux format) inside the file.
-    #   When PyTorch unpickles the file on Windows, it crashes:
-    #     "cannot instantiate 'PosixPath' on your system"
-    #
-    # THE FIX:
-    #   Before loading, temporarily remap PosixPath → WindowsPath.
-    #   The finally block restores pathlib immediately after, no side effects.
-    #   This only activates on Windows — does nothing on Linux/Mac.
-    # ────────────────────────────────────────────────────────────────────────
+def load_yolo_model(path):
+    """Load YOLO model with Windows PosixPath fix."""
     if not TORCH_AVAILABLE:
         return None, "torch not installed"
 
-    yolo_abs = str(os.path.abspath(YOLO_PATH))
+    yolo_abs = str(os.path.abspath(path))
     if not os.path.exists(yolo_abs):
         return None, f"weights not found: {yolo_abs}"
 
@@ -133,14 +141,9 @@ def load_yolo():
 
         try:
             repo_abs = str(os.path.abspath(YOLO_REPO_PATH))
-
-            # Disable YOLOv5's internal requirements auto-checker.
-            # It has a pip quoting bug on Python 3.12 that causes harmless
-            # but noisy "InvalidMarker" warnings in the terminal.
             os.environ["YOLOV5_NO_CHECK_REQUIREMENTS"] = "1"
 
             if os.path.isdir(repo_abs):
-                # Use the yolov5/ folder already in your project — no internet needed
                 m = torch.hub.load(
                     repo_abs,
                     "custom",
@@ -149,7 +152,6 @@ def load_yolo():
                     verbose=False,
                 )
             else:
-                # Fallback: download from GitHub (needs internet, runs once only)
                 m = torch.hub.load(
                     "ultralytics/yolov5",
                     "custom",
@@ -158,7 +160,6 @@ def load_yolo():
                     verbose=False,
                 )
         finally:
-            # Always restore pathlib — even if loading raised an exception
             if _patch_target is not None:
                 pathlib.PosixPath = _patch_target
 
@@ -168,9 +169,147 @@ def load_yolo():
     except Exception as e:
         return None, str(e)
 
-cnn_model,  cnn_ok   = load_cnn()
-unet_model, unet_ok  = load_unet()
-yolo_model, yolo_ok  = load_yolo()
+# =================================================
+# LOAD ALL MODELS AT STARTUP
+# =================================================
+st.session_state.setdefault('models_loaded', False)
+
+if not st.session_state.models_loaded:
+    with st.spinner("Loading all models (RGB + SAR)..."):
+        # Load RGB models
+        rgb_cnn, rgb_cnn_ok = load_keras_model(RGB_CNN_PATH)
+        rgb_unet, rgb_unet_ok = load_unet_model(RGB_UNET_PATH)
+        rgb_yolo, rgb_yolo_ok = load_yolo_model(RGB_YOLO_PATH)
+
+        # Load SAR models
+        sar_cnn, sar_cnn_ok = load_keras_model(SAR_CNN_PATH)
+        sar_unet, sar_unet_ok = load_unet_model(SAR_UNET_PATH)
+        sar_yolo, sar_yolo_ok = load_yolo_model(SAR_YOLO_PATH)
+
+        st.session_state.models_loaded = True
+        st.session_state.rgb_cnn = rgb_cnn
+        st.session_state.rgb_unet = rgb_unet
+        st.session_state.rgb_yolo = rgb_yolo
+        st.session_state.sar_cnn = sar_cnn
+        st.session_state.sar_unet = sar_unet
+        st.session_state.sar_yolo = sar_yolo
+        st.session_state.rgb_cnn_ok = rgb_cnn_ok
+        st.session_state.rgb_unet_ok = rgb_unet_ok
+        st.session_state.rgb_yolo_ok = rgb_yolo_ok
+        st.session_state.sar_cnn_ok = sar_cnn_ok
+        st.session_state.sar_unet_ok = sar_unet_ok
+        st.session_state.sar_yolo_ok = sar_yolo_ok
+
+# Retrieve models from session state
+rgb_cnn = st.session_state.get('rgb_cnn')
+rgb_unet = st.session_state.get('rgb_unet')
+rgb_yolo = st.session_state.get('rgb_yolo')
+sar_cnn = st.session_state.get('sar_cnn')
+sar_unet = st.session_state.get('sar_unet')
+sar_yolo = st.session_state.get('sar_yolo')
+rgb_cnn_ok = st.session_state.get('rgb_cnn_ok', False)
+rgb_unet_ok = st.session_state.get('rgb_unet_ok', False)
+rgb_yolo_ok = st.session_state.get('rgb_yolo_ok', False)
+sar_cnn_ok = st.session_state.get('sar_cnn_ok', False)
+sar_unet_ok = st.session_state.get('sar_unet_ok', False)
+sar_yolo_ok = st.session_state.get('sar_yolo_ok', False)
+
+# =================================================
+# MODEL SELECTION LOGIC (Global scope)
+# =================================================
+# Model Type Selection
+model_type = st.sidebar.radio(
+    "Select Model Type",
+    ["RGB Models (Optical)", "SAR Models (Radar)"],
+    index=0,
+    help="Choose between optical satellite imagery models (RGB) or radar imagery models (SAR)"
+)
+
+# Set active models based on selection
+if "RGB" in model_type:
+    cnn_model = rgb_cnn
+    unet_model = rgb_unet
+    yolo_model = rgb_yolo
+    cnn_ok = rgb_cnn_ok
+    unet_ok = rgb_unet_ok
+    yolo_ok = rgb_yolo_ok
+    cnn_path = RGB_CNN_PATH
+    unet_path = RGB_UNET_PATH
+    yolo_path = RGB_YOLO_PATH
+else:
+    cnn_model = sar_cnn
+    unet_model = sar_unet
+    yolo_model = sar_yolo
+    cnn_ok = sar_cnn_ok
+    unet_ok = sar_unet_ok
+    yolo_ok = sar_yolo_ok
+    cnn_path = SAR_CNN_PATH
+    unet_path = SAR_UNET_PATH
+    yolo_path = SAR_YOLO_PATH
+
+# =================================================
+# SIDEBAR - SETTINGS
+# =================================================
+with st.sidebar:
+    st.header("⚙️ Settings")
+
+    st.divider()
+
+    # Model Status Display with Active Highlighting
+    st.markdown("<p class='section-label'>Model Status</p>", unsafe_allow_html=True)
+
+    # Active model type highlight
+    st.markdown(f"""
+    <div class="active-model" style="color: white; text-align: center; font-weight: bold;">
+        🎯 Active: {model_type}
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"{'✅' if cnn_ok else '❌'} **CNN**  `{cnn_path.name}`")
+    st.markdown(f"{'✅' if unet_ok else '❌'} **U-Net** `{unet_path.name}`")
+    st.markdown(f"{'✅' if yolo_ok else '⚠️'} **YOLO** `{yolo_path.name}`")
+
+    st.divider()
+
+    # All Models Status
+    with st.expander("📊 All Loaded Models"):
+        st.markdown("**RGB Models (Optical)**")
+        st.markdown(f"{'✅' if rgb_cnn_ok else '❌'} CNN: `{RGB_CNN_PATH.name}`")
+        st.markdown(f"{'✅' if rgb_unet_ok else '❌'} U-Net: `{RGB_UNET_PATH.name}`")
+        st.markdown(f"{'✅' if rgb_yolo_ok else '⚠️'} YOLO: `{RGB_YOLO_PATH.name}`")
+        st.divider()
+        st.markdown("**SAR Models (Radar)**")
+        st.markdown(f"{'✅' if sar_cnn_ok else '❌'} CNN: `{SAR_CNN_PATH.name}`")
+        st.markdown(f"{'✅' if sar_unet_ok else '❌'} U-Net: `{SAR_UNET_PATH.name}`")
+        st.markdown(f"{'✅' if sar_yolo_ok else '⚠️'} YOLO: `{SAR_YOLO_PATH.name}`")
+
+    st.divider()
+
+    # Detection Sensitivity
+    st.markdown("<p class='section-label'>Detection Sensitivity</p>", unsafe_allow_html=True)
+    cnn_thr  = st.slider("CNN threshold",          0.0, 1.0, CNN_THRESHOLD,  0.01,
+                          help="Minimum CNN confidence to trigger segmentation")
+    unet_thr = st.slider("Segmentation threshold", 0.0, 1.0, UNET_THRESHOLD, 0.01,
+                          help="Lower = more oil detected · Higher = stricter")
+    min_area = st.number_input("Min spill size (px)", 0, value=MIN_AREA, step=50,
+                                help="Blobs smaller than this are ignored")
+    yolo_cf  = st.slider("YOLO confidence",         0.0, 1.0, YOLO_CONF,     0.01,
+                          help="Minimum YOLO bounding-box confidence")
+    st.divider()
+
+    # Visualisation
+    st.markdown("<p class='section-label'>Visualisation</p>", unsafe_allow_html=True)
+    show_outline = st.toggle("Oil boundary outline", value=True)
+    st.divider()
+
+    # Colour Guide
+    st.markdown("<p class='section-label'>Colour Guide</p>", unsafe_allow_html=True)
+    st.markdown("""
+🟥 **Red fill** — oil region  
+⬛ **Black line** — oil boundary  
+🟨 **Cyan box** — YOLO detection  
+⬜ **White mask** — segmentation output  
+    """)
 
 # =================================================
 # CORE PROCESSING FUNCTIONS
@@ -254,7 +393,7 @@ def compute_metrics(mask: np.ndarray) -> dict:
 # =================================================
 PIE_COLORS = ["#e63946", "#4CAF50"]
 
-def pie_chart(oil_pct: float, title: str, figsize=(5, 4)):
+def pie_chart(oil_pct: float, title: str, figsize=(4, 3)):
     fig, ax = plt.subplots(figsize=figsize)
     ax.pie([oil_pct, 100 - oil_pct], labels=["Oil Spill", "Clean Water"],
            autopct="%1.1f%%", colors=PIE_COLORS, explode=(0.07, 0),
@@ -264,27 +403,9 @@ def pie_chart(oil_pct: float, title: str, figsize=(5, 4)):
     return fig
 
 
-def summary_chart(metrics: dict, cnn_prob: float, yolo_count: int):
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-    fig.suptitle("Multi-Model Detection Summary", fontsize=13, fontweight="bold")
-    axes[0].bar(["CNN"], [cnn_prob * 100], color="#2196F3", alpha=0.8, width=0.4)
-    axes[0].axhline(CNN_THRESHOLD * 100, color="red", ls="--", lw=1.5, label=f"Threshold {CNN_THRESHOLD}")
-    axes[0].set_ylim(0, 100); axes[0].set_ylabel("Confidence (%)"); axes[0].legend(fontsize=8)
-    axes[0].set_title("CNN Classification", fontweight="bold"); axes[0].grid(axis="y", alpha=0.3)
-    axes[1].bar(["Components", "Largest (px/10)"],
-                [metrics["n_comps"], metrics["largest_px"] / 10],
-                color=["#9C27B0", "#FF9800"], alpha=0.8)
-    axes[1].set_title("U-Net Components", fontweight="bold"); axes[1].grid(axis="y", alpha=0.3)
-    scores = [min(cnn_prob * 100, 100), metrics["oil_pct"], min(yolo_count * 20, 100)]
-    axes[2].bar(["CNN\nConf %", "U-Net\nSpill %", f"YOLO\n({yolo_count} det)"],
-                scores, color=["#2196F3", "#e63946", "#FF9800"], alpha=0.8)
-    axes[2].set_ylim(0, 100); axes[2].set_title("All Models", fontweight="bold")
-    axes[2].grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    return fig
 
 
-def report_figure(img_rgb, mask, overlay, metrics, cnn_prob, yolo_count, timestamp):
+def report_figure(img_rgb, mask, overlay, metrics, cnn_prob, yolo_count, timestamp, model_type_str):
     oil_pct = metrics["oil_pct"]
     fig = plt.figure(figsize=(15, 8))
     gs  = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.3)
@@ -302,11 +423,11 @@ def report_figure(img_rgb, mask, overlay, metrics, cnn_prob, yolo_count, timesta
     ax_t = fig.add_subplot(gs[1, 1]); ax_t.axis("off")
     ax_t.text(0.08, 0.5, (
         f"DETECTION RESULTS\n\n"
-        f"Timestamp : {timestamp}\n\n"
+        f"Timestamp : {timestamp}\n"
+        f"Model Type: {model_type_str}\n\n"
         f"CNN Confidence  : {cnn_prob:.3f}\n"
         f"U-Net Oil Cover : {oil_pct:.2f}%\n"
-        f"YOLO Detections : {yolo_count}\n\n"
-        f"Components      : {metrics['n_comps']}\n"
+        f"\nComponents      : {metrics['n_comps']}\n"
         f"Largest Region  : {metrics['largest_px']} px\n"
         f"Total Oil Pixels: {metrics['oil_px']}"
     ), fontfamily="monospace", fontsize=8.5, va="center",
@@ -317,8 +438,7 @@ def report_figure(img_rgb, mask, overlay, metrics, cnn_prob, yolo_count, timesta
         "🔴  Red fill     → Oil region\n"
         "⚪  White mask  → Segmentation\n"
         "⬛  Black line   → Oil boundary\n"
-        "🟨  Cyan box    → YOLO detection\n\n"
-        "MODELS\n"
+        "\nMODELS\n"
         "• CNN  — binary classifier\n"
         "• U-Net — pixel segmentation\n"
         "• YOLO  — bounding-box detect"
@@ -349,44 +469,13 @@ def img_to_bytes(arr: np.ndarray) -> bytes:
 st.markdown("""
 <div class="hero">
     <h1>🛢️ AI-Driven Oil Spill Detection</h1>
-    <p>CNN · U-Net · YOLO — multi-model satellite image analysis</p>
+    <p>CNN · U-Net · YOLO — multi-model satellite image analysis (RGB + SAR)</p>
 </div>
 """, unsafe_allow_html=True)
 
 timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S IST")
 st.caption(f"⏰ Session timestamp: {timestamp}")
 st.divider()
-
-# =================================================
-# SIDEBAR
-# =================================================
-with st.sidebar:
-    st.header("⚙️ Settings")
-    st.markdown("<p class='section-label'>Model Status</p>", unsafe_allow_html=True)
-    st.markdown(f"{'✅' if cnn_ok  is True else '❌'} **CNN**  `{CNN_PATH.name}`")
-    st.markdown(f"{'✅' if unet_ok is True else '❌'} **U-Net** `{UNET_PATH.name}`")
-    st.markdown(f"{'✅' if yolo_ok is True else '⚠️'} **YOLO** `{YOLO_PATH.name}`")
-    st.divider()
-    st.markdown("<p class='section-label'>Detection Sensitivity</p>", unsafe_allow_html=True)
-    cnn_thr  = st.slider("CNN threshold",          0.0, 1.0, CNN_THRESHOLD,  0.01,
-                          help="Minimum CNN confidence to trigger segmentation")
-    unet_thr = st.slider("Segmentation threshold", 0.0, 1.0, UNET_THRESHOLD, 0.01,
-                          help="Lower = more oil detected · Higher = stricter")
-    min_area = st.number_input("Min spill size (px)", 0, value=MIN_AREA, step=50,
-                                help="Blobs smaller than this are ignored")
-    yolo_cf  = st.slider("YOLO confidence",         0.0, 1.0, YOLO_CONF,     0.01,
-                          help="Minimum YOLO bounding-box confidence")
-    st.divider()
-    st.markdown("<p class='section-label'>Visualisation</p>", unsafe_allow_html=True)
-    show_outline = st.toggle("Oil boundary outline", value=True)
-    st.divider()
-    st.markdown("<p class='section-label'>Colour Guide</p>", unsafe_allow_html=True)
-    st.markdown("""
-🟥 **Red fill** — oil region  
-⬛ **Black line** — oil boundary  
-🟨 **Cyan box** — YOLO detection  
-⬜ **White mask** — segmentation output  
-    """)
 
 # =================================================
 # UPLOAD
@@ -433,7 +522,7 @@ img_bgr = cv2.imdecode(raw, cv2.IMREAD_COLOR)
 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 safe_ts = timestamp.replace(":", "-").replace(" ", "_")
 
-st.image(img_rgb, caption="Uploaded image", width="stretch")
+st.image(img_rgb, caption="Uploaded image", width=300)
 
 with st.spinner("Running models…"):
 
@@ -477,11 +566,11 @@ st.subheader("🎨 Visual Analysis")
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.image(img_rgb,          caption="📷 Original",      width="stretch")
+    st.image(img_rgb,          caption="📷 Original",      width=300)
 with c2:
-    st.image(final_mask * 255, caption="⚪ U-Net Mask",     width="stretch", clamp=True)
+    st.image(final_mask * 255, caption="⚪ U-Net Mask",     width=300, clamp=True)
 with c3:
-    st.image(overlay_yolo,     caption="🔴 Overlay + YOLO", width="stretch")
+    st.image(overlay_yolo,     caption="🔴 Overlay + YOLO", width=300)
 
 # =================================================
 # RESULTS — METRICS
@@ -495,19 +584,17 @@ m2.metric("CNN Score",       f"{cnn_prob:.3f}")
 m3.metric("Spill Regions",   metrics["n_comps"])
 m4.metric("YOLO Detections", yolo_count)
 
-col_pie, col_chart = st.columns([1, 2])
-with col_pie:
-    st.pyplot(pie_chart(metrics["oil_pct"], "Oil vs Clean Water"))
-    plt.close()
-with col_chart:
-    st.pyplot(summary_chart(metrics, cnn_prob, yolo_count))
-    plt.close()
+col1, col2, col3 = st.columns([1,2,1])
 
+with col2:
+    st.pyplot(pie_chart(metrics["oil_pct"], "Oil vs Clean Water"), use_container_width=False)
 # =================================================
 # RESULTS — MODEL DETAIL
 # =================================================
 st.divider()
 st.subheader("ℹ️ Model Details")
+
+model_type_display = "RGB (Optical)" if "RGB" in model_type else "SAR (Radar)"
 
 with st.expander("🧠 CNN — Binary Classifier"):
     st.markdown(f"""
@@ -516,7 +603,8 @@ with st.expander("🧠 CNN — Binary Classifier"):
 | Confidence score | `{cnn_prob:.4f}` |
 | Threshold | `{cnn_thr}` |
 | Decision | {'🚨 Oil detected' if cnn_prob >= cnn_thr else '✅ Clean'} |
-| Model file | `{CNN_PATH.name}` |
+| Model Type | `{model_type_display}` |
+| Model file | `{cnn_path.name}` |
 """)
 
 with st.expander("🎯 U-Net — Segmentation"):
@@ -530,7 +618,8 @@ with st.expander("🎯 U-Net — Segmentation"):
 | Threshold used | `{unet_thr}` |
 | Min blob size | `{int(min_area)} px` |
 | Polarity inverted | `{inverted}` |
-| Model file | `{UNET_PATH.name}` |
+| Model Type | `{model_type_display}` |
+| Model file | `{unet_path.name}` |
 """)
 
 with st.expander("📍 YOLO — Object Detection"):
@@ -541,7 +630,8 @@ with st.expander("📍 YOLO — Object Detection"):
 | Detections | `{yolo_count}` |
 | Confidence threshold | `{yolo_cf}` |
 | Status | ✅ Loaded |
-| Model file | `{YOLO_PATH.name}` |
+| Model Type | `{model_type_display}` |
+| Model file | `{yolo_path.name}` |
 """)
     else:
         st.warning(f"⚠️ YOLO unavailable — {yolo_ok}")
@@ -553,7 +643,7 @@ st.divider()
 st.subheader("⬇️ Download Results")
 
 report_png = fig_to_bytes(
-    report_figure(img_rgb, final_mask, overlay_yolo, metrics, cnn_prob, yolo_count, timestamp)
+    report_figure(img_rgb, final_mask, overlay_yolo, metrics, cnn_prob, yolo_count, timestamp, model_type_display)
 )
 
 st.download_button(
@@ -582,6 +672,7 @@ st.divider()
 st.markdown("""
 <div style='text-align:center;color:#888;font-size:.82rem;'>
     🛢️ AI-Driven Oil Spill Detection &nbsp;·&nbsp;
-    TensorFlow &nbsp;·&nbsp; YOLO &nbsp;·&nbsp; Streamlit
+    TensorFlow &nbsp;·&nbsp; YOLO &nbsp;·&nbsp; Streamlit &nbsp;·&nbsp;
+    RGB + SAR Models
 </div>
 """, unsafe_allow_html=True)
