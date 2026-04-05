@@ -9,11 +9,11 @@ from tqdm import tqdm
 # PATHS
 # ----------------------------
 
-MODEL_PATH = "/kaggle/input/datasets/sanjaykrishnatn/yolo-sar/best.pt"
+MODEL_PATH = "models-sar/yolo/best.pt"
 
-IMAGE_DIR = "/kaggle/input/datasets/sanjaykrishnatn/processed-oil-spill/processed-d3/processed-d3/yolo/images/val"
+IMAGE_DIR = "src/data/processed-d3/yolo/images/val"
 
-LABEL_DIR = "/kaggle/input/datasets/sanjaykrishnatn/processed-oil-spill/processed-d3/processed-d3/yolo/labels/val"
+LABEL_DIR = "src/data/processed-d3/yolo/labels/val"
 
 
 # ----------------------------

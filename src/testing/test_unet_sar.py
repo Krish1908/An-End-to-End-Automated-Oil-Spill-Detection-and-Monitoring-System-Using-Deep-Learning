@@ -26,7 +26,7 @@ else:
 # PROJECT ROOT
 # ---------------------------------------------------
 
-PROJECT_ROOT = "/kaggle/working"
+PROJECT_ROOT = "."
 
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
@@ -35,13 +35,13 @@ if PROJECT_ROOT not in sys.path:
 # PATH CONFIG
 # ---------------------------------------------------
 
-MODEL_PATH = "/kaggle/input/datasets/sanjaykrishnatn/unet-sar/unet_sar.keras"
+MODEL_PATH = "models-sar/unet/unet_sar.keras"
 
-IMG_DIR = "/kaggle/input/datasets/sanjaykrishnatn/processed-oil-spill/processed-d3/processed-d3/cnn_unet/val/images"
+IMG_DIR = "src/data/processed-d3/cnn_unet/val/images"
 
-MASK_DIR = "/kaggle/input/datasets/sanjaykrishnatn/processed-oil-spill/processed-d3/processed-d3/cnn_unet/val/masks"
+MASK_DIR = "src/data/processed-d3/cnn_unet/val/masks"
 
-SAVE_DIR = "/kaggle/working/unet_results"
+SAVE_DIR = "results-d3/unet_results"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 

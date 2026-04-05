@@ -19,16 +19,16 @@ from sklearn.metrics import (
 # PATH SETUP
 # ---------------------------------------------------
 
-PROJECT_ROOT = "/content/drive/MyDrive/OIL-SPILL-8/src"
+PROJECT_ROOT = "src"
 
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from data.dataloader_cnn_sar import create_dataset
 
-MODEL_PATH = "/content/drive/MyDrive/OIL-SPILL-8/models-sar/cnn/cnn_classifier.keras"
+MODEL_PATH = "models-sar/cnn/cnn_classifier.keras"
 
-SAVE_DIR = "/content/drive/MyDrive/OIL-SPILL-8/models-sar/cnn/test_results"
+SAVE_DIR = "models-sar/cnn/test_results"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 

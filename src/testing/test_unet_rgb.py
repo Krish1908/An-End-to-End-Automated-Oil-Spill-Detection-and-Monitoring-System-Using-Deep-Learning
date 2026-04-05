@@ -12,7 +12,7 @@ import cv2
 # ---------------------------------------------------
 # ADD PROJECT ROOT
 # ---------------------------------------------------
-PROJECT_ROOT = "/content/drive/MyDrive/OIL-SPILL-8/src"
+PROJECT_ROOT = "src"
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -21,10 +21,10 @@ from models.unet import dice_coef
 # ---------------------------------------------------
 # PATH CONFIG
 # ---------------------------------------------------
-MODEL_PATH = "/content/drive/MyDrive/OIL-SPILL-8/models-d1/unet/unet_segmentation.keras"
+MODEL_PATH = "models-d1/unet/unet_segmentation.keras"
 
-TEST_IMG_DIR = "/content/drive/MyDrive/OIL-SPILL-8/src/data/processed-d1/test/images"
-SAVE_DIR = "/content/drive/MyDrive/OIL-SPILL-8/results-d1/unet_predictions"
+TEST_IMG_DIR = "src/data/processed-d1/test/images"
+SAVE_DIR = "results-d1/unet_predictions"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
