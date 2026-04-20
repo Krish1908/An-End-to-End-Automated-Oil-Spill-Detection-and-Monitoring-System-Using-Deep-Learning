@@ -1,0 +1,83 @@
+name: Deploy Oil Spill SaaS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2 (Oil Spill SaaS)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "🚀 Starting Oil Spill SaaS deployment..."
+
+            # =========================================
+            # STEP 1: NAVIGATE TO PROJECT DIRECTORY
+            # =========================================
+            echo "📂 Navigating to project directory..."
+            cd /var/www/An-End-to-End-Automated-Oil-Spill-Detection-and-Monitoring-System-Using-Deep-Learning
+            echo "✅ Directory ready"
+
+            # =========================================
+            # STEP 2: GIT SYNC (SAFE DEPLOY)
+            # =========================================
+            echo "🔄 Fetching latest code..."
+            git fetch --all
+
+            echo "🔄 Resetting to origin/main..."
+            git reset --hard origin/main
+
+            echo "🔄 Pulling latest changes..."
+            git pull origin main
+            echo "✅ Code updated"
+
+            # =========================================
+            # STEP 3: ACTIVATE VENV
+            # =========================================
+            echo "🐍 Activating virtual environment..."
+            source venv/bin/activate
+            echo "✅ Venv activated"
+
+            # =========================================
+            # STEP 4: INSTALL DEPENDENCIES
+            # =========================================
+            echo "📦 Upgrading pip..."
+            pip install --upgrade pip
+
+            echo "📦 Installing requirements..."
+            pip install --no-cache-dir -r requirements.txt
+            echo "✅ Dependencies installed"
+
+            # =========================================
+            # STEP 5: RESTART APPLICATION
+            # =========================================
+            echo "🔄 Restarting Streamlit service..."
+            sudo systemctl daemon-reload
+            sudo systemctl restart oilspill
+            echo "✅ Streamlit restarted"
+
+            # =========================================
+            # STEP 6: RESTART NGINX
+            # =========================================
+            echo "🌐 Restarting nginx..."
+            sudo systemctl restart nginx
+            echo "✅ Nginx restarted"
+
+            # =========================================
+            # STEP 7: STATUS CHECK
+            # =========================================
+            echo "📊 Checking service status..."
+            sudo systemctl status oilspill --no-pager
+            echo "✅ Service running"
+
+            echo "🎉 Deployment completed successfully!"
