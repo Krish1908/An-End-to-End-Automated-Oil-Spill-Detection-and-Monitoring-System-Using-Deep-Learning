@@ -300,6 +300,7 @@ with st.sidebar:
     # Visualisation
     st.markdown("<p class='section-label'>Visualisation</p>", unsafe_allow_html=True)
     show_outline = st.toggle("Oil boundary outline", value=True)
+    show_overlay = st.toggle("Show overlay", value=True)
     st.divider()
 
     # Colour Guide
@@ -557,6 +558,16 @@ with st.spinner("Running models…"):
     overlay      = build_overlay(img_rgb, final_mask, outline=show_outline)
     yolo_names   = yolo_model.names if yolo_model is not None else {}
     overlay_yolo = draw_yolo_boxes(overlay, yolo_results, class_names=yolo_names)
+    
+    # If overlay is disabled, show original with just boundaries (no red fill)
+    if show_overlay:
+        display_overlay = overlay_yolo
+        overlay_caption = "🔴 Overlay + YOLO"
+    else:
+        # Show original image with boundaries only (no red fill)
+        boundary_only = build_overlay(img_rgb, final_mask, outline=show_outline, alpha=0.0)
+        display_overlay = draw_yolo_boxes(boundary_only, yolo_results, class_names=yolo_names)
+        overlay_caption = "⬛ Boundary Only"
 
 # =================================================
 # RESULTS — VISUAL
@@ -570,7 +581,7 @@ with c1:
 with c2:
     st.image(final_mask * 255, caption="⚪ U-Net Mask",     width=300, clamp=True)
 with c3:
-    st.image(overlay_yolo,     caption="🔴 Overlay + YOLO", width=300)
+    st.image(display_overlay,  caption=overlay_caption, width=300)
 
 # =================================================
 # RESULTS — METRICS

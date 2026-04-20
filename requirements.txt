@@ -1,10 +1,11 @@
 # Oil Spill Detection — Requirements
 # Python 3.12
 
-# Deep Learning
-tensorflow==2.20.0
-torch==2.10.0+cpu
-torchvision==0.25.0+cpu
+# Deep Learning (CPU only)
+tensorflow-cpu==2.20.0
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
 
 # Computer Vision & Image Processing
 opencv-python==4.13.0.92
@@ -14,7 +15,6 @@ Pillow==11.3.0
 numpy==2.3.4
 pandas==2.3.3
 scipy==1.16.2
-
 
 # Visualization
 matplotlib==3.10.7
