@@ -469,7 +469,7 @@ def img_to_bytes(arr: np.ndarray) -> bytes:
 # =================================================
 st.markdown("""
 <div class="hero">
-    <h1>🛢️ AI-Driven Oil Spill Detection krishhh</h1>
+    <h1>🛢️ AI-Driven Oil Spill Detection</h1>
     <p>CNN · U-Net · YOLO — multi-model satellite image analysis (RGB + SAR)</p>
 </div>
 """, unsafe_allow_html=True)
