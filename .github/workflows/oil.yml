@@ -25,7 +25,7 @@ jobs:
             # STEP 1: NAVIGATE TO PROJECT DIRECTORY
             # =========================================
             echo "📂 Navigating to project directory..."
-            cd /var/www/An-End-to-End-Automated-Oil-Spill-Detection-and-Monitoring-System-Using-Deep-Learning
+            cd /opt/An-End-to-End-Automated-Oil-Spill-Detection-and-Monitoring-System-Using-Deep-Learning
             echo "✅ Directory ready"
 
             # =========================================

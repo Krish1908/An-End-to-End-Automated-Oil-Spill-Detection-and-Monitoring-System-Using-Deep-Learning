@@ -220,7 +220,7 @@ sar_yolo_ok = st.session_state.get('sar_yolo_ok', False)
 # Model Type Selection
 model_type = st.sidebar.radio(
     "Select Model Type",
-    ["RGB Models (Optical)", "SAR Models (Radar)"],
+    ["RGB Models (Optical)", "SAR Models (Radarrrrr)"],
     index=0,
     help="Choose between optical satellite imagery models (RGB) or radar imagery models (SAR)"
 )
