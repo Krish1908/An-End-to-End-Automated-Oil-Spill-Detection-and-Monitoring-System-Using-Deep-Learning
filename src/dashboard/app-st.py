@@ -22,7 +22,7 @@ import tensorflow as tf
 from PIL import Image
 
 
-from src.observability.tracing import setup_tracing
+from observability.tracing import setup_tracing
 
 
 try:
