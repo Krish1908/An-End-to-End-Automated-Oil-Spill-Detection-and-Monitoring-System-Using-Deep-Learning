@@ -22,8 +22,7 @@ import tensorflow as tf
 from PIL import Image
 
 
-from observability.tracing import setup_tracing
-
+from tracing import setup_tracing
 
 try:
     import torch
