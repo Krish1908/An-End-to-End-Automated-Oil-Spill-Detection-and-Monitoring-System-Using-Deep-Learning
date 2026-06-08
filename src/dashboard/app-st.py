@@ -21,11 +21,18 @@ import streamlit as st
 import tensorflow as tf
 from PIL import Image
 
+
+from src.observability.tracing import setup_tracing
+
+
 try:
     import torch
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+
+
+tracer = setup_tracing()
 
 # =================================================
 # CONSTANTS
@@ -525,49 +532,54 @@ safe_ts = timestamp.replace(":", "-").replace(" ", "_")
 
 st.image(img_rgb, caption="Uploaded image", width=300)
 
-with st.spinner("Running models…"):
 
-    batch    = preprocess(img_rgb)
-    cnn_prob = float(cnn_model.predict(batch, verbose=0)[0][0])
+with tracer.start_as_current_span("oilspill-analysis") as span:
 
-    if cnn_prob < cnn_thr:
-        st.success(f"✅ No oil spill detected  (CNN score: {cnn_prob:.3f} < threshold {cnn_thr})")
-        st.stop()
+    span.set_attribute("application.name", "oilspill-streamlit")
 
-    st.warning(f"🚨 Oil spill detected  (CNN score: {cnn_prob:.3f})")
+    with st.spinner("Running models…"):
 
-    pred_prob = unet_model.predict(batch, verbose=0)[0].squeeze()
-    pred_prob, inverted = auto_invert(pred_prob)
-    if inverted:
-        st.info("ℹ️ U-Net polarity auto-corrected (model outputs high = background).")
+        batch    = preprocess(img_rgb)
+        cnn_prob = float(cnn_model.predict(batch, verbose=0)[0][0])
 
-    final_mask = postprocess_mask(pred_prob, unet_thr, int(min_area))
-    metrics    = compute_metrics(final_mask)
+        if cnn_prob < cnn_thr:
+            st.success(f"✅ No oil spill detected  (CNN score: {cnn_prob:.3f} < threshold {cnn_thr})")
+            st.stop()
 
-    yolo_results = None
-    yolo_count   = 0
-    if yolo_model is not None:
-        try:
-            if yolo_model.conf != yolo_cf:
-                yolo_model.conf = yolo_cf
-            yolo_results = yolo_model(img_rgb)
-            yolo_count   = len(yolo_results.xyxy[0]) if yolo_results is not None else 0
-        except Exception as e:
-            st.warning(f"⚠️ YOLO inference failed: {e}")
+        st.warning(f"🚨 Oil spill detected  (CNN score: {cnn_prob:.3f})")
 
-    overlay      = build_overlay(img_rgb, final_mask, outline=show_outline)
-    yolo_names   = yolo_model.names if yolo_model is not None else {}
-    overlay_yolo = draw_yolo_boxes(overlay, yolo_results, class_names=yolo_names)
-    
-    # If overlay is disabled, show original with just boundaries (no red fill)
-    if show_overlay:
-        display_overlay = overlay_yolo
-        overlay_caption = "🔴 Overlay + YOLO"
-    else:
-        # Show original image with boundaries only (no red fill)
-        boundary_only = build_overlay(img_rgb, final_mask, outline=show_outline, alpha=0.0)
-        display_overlay = draw_yolo_boxes(boundary_only, yolo_results, class_names=yolo_names)
-        overlay_caption = "⬛ Boundary Only"
+        pred_prob = unet_model.predict(batch, verbose=0)[0].squeeze()
+        pred_prob, inverted = auto_invert(pred_prob)
+        if inverted:
+            st.info("ℹ️ U-Net polarity auto-corrected (model outputs high = background).")
+
+        final_mask = postprocess_mask(pred_prob, unet_thr, int(min_area))
+        metrics    = compute_metrics(final_mask)
+
+        yolo_results = None
+        yolo_count   = 0
+        if yolo_model is not None:
+            try:
+                if yolo_model.conf != yolo_cf:
+                    yolo_model.conf = yolo_cf
+                yolo_results = yolo_model(img_rgb)
+                yolo_count   = len(yolo_results.xyxy[0]) if yolo_results is not None else 0
+            except Exception as e:
+                st.warning(f"⚠️ YOLO inference failed: {e}")
+
+        overlay      = build_overlay(img_rgb, final_mask, outline=show_outline)
+        yolo_names   = yolo_model.names if yolo_model is not None else {}
+        overlay_yolo = draw_yolo_boxes(overlay, yolo_results, class_names=yolo_names)
+        
+        # If overlay is disabled, show original with just boundaries (no red fill)
+        if show_overlay:
+            display_overlay = overlay_yolo
+            overlay_caption = "🔴 Overlay + YOLO"
+        else:
+            # Show original image with boundaries only (no red fill)
+            boundary_only = build_overlay(img_rgb, final_mask, outline=show_outline, alpha=0.0)
+            display_overlay = draw_yolo_boxes(boundary_only, yolo_results, class_names=yolo_names)
+            overlay_caption = "⬛ Boundary Only"
 
 # =================================================
 # RESULTS — VISUAL
